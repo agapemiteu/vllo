@@ -1,8 +1,8 @@
-import { store } from "./caseStore.js";
+import { first, store } from "./caseStore.js";
 import type { RoomId } from "./types.js";
 
 const pretty = (v: string) => v.replace(/_/g, " ");
-const name = (r: RoomId) => (r === "daniel" ? "Daniel" : "Tunde");
+const name = (r: RoomId) => first(r);
 
 /**
  * What earlier interviews established that bears on this person.

@@ -1,5 +1,6 @@
 import type { RoomId } from "./types.js";
 import { other } from "./types.js";
+import { first } from "./caseStore.js";
 
 interface Rule {
   id: string;
@@ -7,13 +8,15 @@ interface Rule {
   instruction: string;
 }
 
-const NAMES: Record<RoomId, RegExp> = { daniel: /\bdaniel\b/i, tunde: /\btunde\b/i };
+const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** The other person's registered first name (and the sample name), as a whole word. */
+const otherName = (r: RoomId) => new RegExp(`\\b(${escape(first(r))}|${r})\\b`, "i");
 
 const ACCUSATORY = /\b(lie|lying|liar|lied|guilty|admit|confess|you did it|caught)\b/i;
 const LEADING = /(isn't it true|didn't you|you did .* right\?|wouldn't you agree|admit that)/i;
 const COERCIVE = /(better for you|if you cooperate|we already know|no point denying|make this easier)/i;
 const sourceLeak = (q: string, room: RoomId) =>
-  NAMES[other(room)].test(q) || /\b(he|she|they|someone|your friend) (said|told us|claims|admitted)\b/i.test(q);
+  otherName(other(room)).test(q) || /\b(he|she|they|someone|your friend) (said|told us|claims|admitted)\b/i.test(q);
 
 export const QUESTION_RULES: Rule[] = [
   { id: "SOURCE_LEAK", test: sourceLeak, instruction: "Do not reveal sources or name anyone else being interviewed. Use: 'We have information that...' or ask openly." },

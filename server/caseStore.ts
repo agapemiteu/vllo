@@ -10,6 +10,16 @@ export const CASE = JSON.parse(
   readFileSync(fileURLToPath(new URL("./case/case_024.json", import.meta.url)), "utf8"),
 );
 
+/** Default profiles, so a full reset restores the sample subjects. */
+const DEFAULT_PEOPLE = JSON.parse(JSON.stringify(CASE.interviewees));
+
+/** Registered display name (first name) for a role, used in every console-facing sentence. */
+export const first = (r: RoomId) => String(CASE.interviewees.find((p: any) => p.id === r)?.name ?? r).split(" ")[0];
+
+export function restoreDefaultPeople() {
+  CASE.interviewees = JSON.parse(JSON.stringify(DEFAULT_PEOPLE));
+}
+
 export interface TranscriptLine {
   room: RoomId;
   speaker: "agent" | "interviewee";
@@ -44,6 +54,8 @@ class CaseStore extends EventEmitter {
   };
   /** Back-to-back run: when the first interview ends early, the next is pulled forward to keep the handoff gap. */
   sequence: { order: RoomId[]; gapSec: number } | null = null;
+  /** roles that have been registered through /new */
+  registered: Record<RoomId, boolean> = { daniel: false, tunde: false };
   /** photo version per person (0 = none uploaded) */
   photos: Record<RoomId, number> = { daniel: 0, tunde: 0 };
   private seq!: Record<string, number>;
@@ -145,6 +157,7 @@ class CaseStore extends EventEmitter {
       insights: insights(this),
       plan: this.plan,
       sequence: this.sequence,
+      registered: this.registered,
       photos: this.photos,
       report: this.report,
     };

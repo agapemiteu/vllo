@@ -1,5 +1,5 @@
 import WebSocket from "ws";
-import { store } from "./caseStore.js";
+import { first, store } from "./caseStore.js";
 import { checkAgentTranscript, checkUserTranscript, END_WORDS } from "./guardrails.js";
 import { agentFor, agentLlm } from "./agents.js";
 import { extractClaims, type Thread } from "./extractor.js";
@@ -351,7 +351,7 @@ export class RoomBridge {
           if (brief.items.length) {
             store.log(room, {
               kind: "brief",
-              label: `${brief.items.length} finding${brief.items.length > 1 ? "s" : ""} carried in from ${brief.from === "daniel" ? "Daniel" : "Tunde"}'s interview`,
+              label: `${brief.items.length} finding${brief.items.length > 1 ? "s" : ""} carried in from ${first(brief.from)}'s interview`,
               detail: brief.items.map((i) => i.console).join(" · "),
               refs: brief.items.map((i) => i.claimId),
               status: "done",

@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RoomBridge, setOnRoomEnded, upstreamLog } from "./bridge.js";
-import { store } from "./caseStore.js";
+import { CASE, restoreDefaultPeople, store } from "./caseStore.js";
 import { buildReport } from "./report.js";
 import { decide, releaseApproval } from "./tools.js";
 import { agentFor, agentLlm } from "./agents.js";
@@ -25,6 +25,43 @@ app.use("/api", (req, res, next) => {
 });
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
+
+/**
+ * Register a person of interest into one of the case's two roles, with when and how long to interview them.
+ * start: "manual" | "in" (inSec) | "after" (afterRoom ends, plus gapSec)
+ */
+app.post("/api/register/:id", express.json(), (req, res) => {
+  const id = req.params.id as RoomId;
+  if (!ROOMS.includes(id)) return void res.status(400).json({ error: "unknown role" });
+  const b = req.body ?? {};
+  const p = CASE.interviewees.find((x: any) => x.id === id);
+  if (typeof b.name === "string" && b.name.trim()) p.name = b.name.trim().slice(0, 60);
+  if (typeof b.relation === "string" && b.relation.trim()) p.relation = b.relation.trim().slice(0, 120);
+  if (typeof b.notes === "string") p.on_file = b.notes.trim().slice(0, 400);
+  const plan = store.plan[id];
+  plan.durationSec = Math.min(180, Math.max(45, Number(b.durationSec) || 60));
+  plan.email = typeof b.email === "string" && /^[^\s@]+@[^\s@]+$/.test(b.email.trim()) ? b.email.trim().slice(0, 120) : undefined;
+  plan.after = undefined;
+  plan.scheduledAt = undefined;
+  if (b.start === "in") plan.scheduledAt = Date.now() + Math.min(3600, Math.max(5, Number(b.inSec) || 60)) * 1000;
+  if (b.start === "after" && ROOMS.includes(b.afterRoom) && b.afterRoom !== id) {
+    plan.after = { room: b.afterRoom, gapSec: Math.min(600, Math.max(5, Number(b.gapSec) || 60)) };
+    if (store.rooms[b.afterRoom as RoomId].status === "ENDED") plan.scheduledAt = Date.now() + plan.after.gapSec * 1000;
+  }
+  store.registered[id] = true;
+  store.changed();
+  res.json({ ok: true, id });
+});
+
+app.post("/api/unregister/:id", (req, res) => {
+  const id = req.params.id as RoomId;
+  if (!ROOMS.includes(id)) return void res.status(400).end();
+  store.registered[id] = false;
+  store.plan[id].scheduledAt = undefined;
+  store.plan[id].after = undefined;
+  store.changed();
+  res.json({ ok: true });
+});
 app.get("/api/debug/:room", (req, res) => res.type("text").send((upstreamLog[req.params.room] ?? []).join("\n")));
 
 // Person-of-interest photos, shared by every device (console, plan, room). Kept in memory for the demo.
@@ -76,6 +113,14 @@ const broadcast = () => {
 store.on("change", broadcast);
 
 setOnRoomEnded(() => {
+  // "After X ends": schedule whoever is waiting on the room that just finished.
+  for (const r of ROOMS) {
+    const a = store.plan[r].after;
+    if (a && store.rooms[a.room].status === "ENDED" && !store.plan[r].scheduledAt && store.rooms[r].status === "IDLE") {
+      store.plan[r].scheduledAt = Date.now() + a.gapSec * 1000;
+      store.changed();
+    }
+  }
   // Sequence: first interview ended (early or on time) -> the next starts after the handoff gap.
   const seq = store.sequence;
   if (seq) {
@@ -152,6 +197,16 @@ server.on("upgrade", (req, socket, head) => {
         if (msg.type === "reset") {
           for (const b of Object.values(bridges)) b.hardReset();
           store.reset();
+          if (msg.full) {
+            restoreDefaultPeople();
+            for (const r of ROOMS) {
+              store.registered[r] = false;
+              store.plan[r].scheduledAt = undefined;
+              store.plan[r].after = undefined;
+              photoData.delete(r);
+              store.photos[r] = 0;
+            }
+          }
           // A slot that already passed would fire again immediately after a reset.
           for (const r of ROOMS) if ((store.plan[r].scheduledAt ?? Infinity) <= Date.now()) store.plan[r].scheduledAt = undefined;
           store.sequence = null;

@@ -1,4 +1,5 @@
 import type { Store } from "./caseStore.js";
+import { first } from "./caseStore.js";
 import { locationAt, toMin } from "./conflicts.js";
 import type { Claim, RoomId } from "./types.js";
 
@@ -28,22 +29,22 @@ export function facts(s: Store): Fact[] {
   const handover = latest(s, (c) => c.subject === "car_handover" && c.room === "tunde");
   if (danVehicle?.value === "tunde_corolla" || handover?.value === "lent_to_daniel") {
     const src = [danVehicle?.value === "tunde_corolla" ? danVehicle.id : null, handover?.value === "lent_to_daniel" ? handover.id : null].filter(Boolean) as string[];
-    out.push({ id: "F-car", text: "Daniel had Tunde's grey Corolla on Monday evening", status: src.length > 1 ? "corroborated" : "single_source", sources: [...src, "E1", "E3"] });
+    out.push({ id: "F-car", text: `${first("daniel")} had ${first("tunde")}'s grey Corolla on Monday evening`, status: src.length > 1 ? "corroborated" : "single_source", sources: [...src, "E1", "E3"] });
   }
   const scene = active(s).find((c) => c.subject === "location" && c.about === "daniel" && c.value === "warehouse_area" && (toMin(c.time) ?? 0) >= toMin("20:55")! && (toMin(c.time) ?? 9999) <= toMin("21:15")!);
-  if (scene) out.push({ id: "F-scene", text: `Daniel was near the warehouse at ${scene.time}`, status: "corroborated", sources: [scene.id, "E2"] });
+  if (scene) out.push({ id: "F-scene", text: `${first("daniel")} was near the warehouse at ${scene.time}`, status: "corroborated", sources: [scene.id, "E2"] });
 
   const dc = latest(s, (c) => c.subject === "companion" && c.room === "daniel");
   const tc = latest(s, (c) => c.subject === "companion" && c.room === "tunde");
   if (dc?.value === "tunde" && tc?.value === "daniel")
-    out.push({ id: "F-together", text: `Daniel and Tunde were together${tc.time ? ` around ${tc.time}` : ""}`, status: "corroborated", sources: [dc.id, tc.id] });
+    out.push({ id: "F-together", text: `${first("daniel")} and ${first("tunde")} were together${tc.time ? ` around ${tc.time}` : ""}`, status: "corroborated", sources: [dc.id, tc.id] });
 
   // Any fact both rooms state identically about the same person
   const seen = new Set(out.flatMap((f) => f.sources));
   for (const a of active(s)) {
     if (a.room !== "daniel" || seen.has(a.id) || a.subject === "other") continue;
     const b = active(s).find((x) => x.room === "tunde" && x.about === a.about && x.subject === a.subject && x.value === a.value && !seen.has(x.id));
-    if (b) out.push({ id: `F-${a.id}-${b.id}`, text: `${a.about === "daniel" ? "Daniel" : "Tunde"}: ${pretty(a.subject)} ${pretty(a.value)}${a.time ?? b.time ? ` at ${a.time ?? b.time}` : ""}`, status: "corroborated", sources: [a.id, b.id] });
+    if (b) out.push({ id: `F-${a.id}-${b.id}`, text: `${first(a.about)}: ${pretty(a.subject)} ${pretty(a.value)}${a.time ?? b.time ? ` at ${a.time ?? b.time}` : ""}`, status: "corroborated", sources: [a.id, b.id] });
   }
   return out;
 }
@@ -59,10 +60,10 @@ export function compare(s: Store): Comparison[] {
   const th = latest(s, (c) => c.room === "tunde" && (c.subject === "car_handover" || (c.subject === "vehicle" && c.about === "daniel")));
   const tSaysCorolla = th && (th.value === "lent_to_daniel" || th.value === "tunde_corolla");
   rows.push({
-    topic: "Vehicle Daniel used",
+    topic: `Vehicle ${first("daniel")} used`,
     daniel: dv ? { text: pretty(dv.value), claimId: dv.id } : null,
     tunde: th ? { text: pretty(th.value), claimId: th.id } : null,
-    evidence: "E1 CCTV: Tunde's Corolla at 21:17",
+    evidence: `E1 CCTV: ${first("tunde")}'s Corolla at 21:17`,
     verdict: verdict(dv, th, () => (dv!.value === "tunde_corolla") === !!tSaysCorolla),
   });
 
@@ -83,7 +84,7 @@ export function compare(s: Store): Comparison[] {
     const d = p === "daniel" ? describeLoc(ownFromRoom) : describeLoc(fromOther);
     const t = p === "daniel" ? describeLoc(fromOther) : describeLoc(ownFromRoom);
     rows.push({
-      topic: `${p === "daniel" ? "Daniel" : "Tunde"} at the time of the incident`,
+      topic: `${first(p)} at the time of the incident`,
       daniel: d,
       tunde: t,
       evidence: p === "daniel" ? "E2 phone: 400m from warehouse at 21:06" : undefined,

@@ -1,6 +1,7 @@
 import type { Claim, Conflict, Gap, RoomId } from "./types.js";
 import { ROOMS } from "./types.js";
 import type { Store } from "./caseStore.js";
+import { first } from "./caseStore.js";
 
 export const toMin = (t?: string) => {
   if (!t) return null;
@@ -65,7 +66,7 @@ export function evaluate(s: Store, triggerRoom: RoomId) {
       drafts.push({
         key: "R1", rule: "R1", type: "EXTERNAL_CONFLICT", topic: "phone location 21:06",
         claimIds: [loc.id], evidenceIds: ["E2"], rooms: ["daniel"],
-        summary: `Daniel places himself at "${loc.value}" (${loc.time}), but his phone hit a mast 400m from the warehouse at 21:06.`,
+        summary: `${first("daniel")} places himself at "${loc.value.replace(/_/g, " ")}" (${loc.time}), but his phone hit a mast 400m from the warehouse at 21:06.`,
         challengeHint: HINTS.R1,
       });
     }
@@ -79,7 +80,7 @@ export function evaluate(s: Store, triggerRoom: RoomId) {
       drafts.push({
         key: "R2", rule: "R2", type: "EXTERNAL_CONFLICT", topic: "vehicle",
         claimIds: [danVehicle.id], evidenceIds: ["E1", "E3"], rooms: ["daniel"],
-        summary: "Daniel says he drove his own car. CCTV shows Tunde's grey Corolla leaving Admiralty Way at 21:17.",
+        summary: `${first("daniel")} says he drove his own car. CCTV shows ${first("tunde")}'s grey Corolla leaving Admiralty Way at 21:17.`,
         challengeHint: HINTS.R2,
       });
     }
@@ -93,7 +94,7 @@ export function evaluate(s: Store, triggerRoom: RoomId) {
       drafts.push({
         key: "R3", rule: "R3", type: "CROSS_ACCOUNT_CONFLICT", topic: "vehicle",
         claimIds: [danVehicle.id, handover.id], evidenceIds: [], rooms: ["daniel"],
-        summary: `Daniel: "${danVehicle.quote}". Tunde: "${handover.quote}".`,
+        summary: `${first("daniel")}: "${danVehicle.quote}". ${first("tunde")}: "${handover.quote}".`,
         challengeHint: HINTS.R3,
       });
     }
@@ -183,7 +184,7 @@ function other(r: RoomId): RoomId {
   return r === "daniel" ? "tunde" : "daniel";
 }
 function name(r: RoomId) {
-  return r === "daniel" ? "Daniel" : "Tunde";
+  return first(r);
 }
 
 export function computeGaps(s: Store): Gap[] {

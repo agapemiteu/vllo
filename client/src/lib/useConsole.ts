@@ -27,7 +27,8 @@ export interface Snapshot {
     metrics: { claims: number; facts: number; conflicts: number; resolved: number; questions: number; blocked: number; breaches: number; research: number; coverage: { daniel: number; tunde: number } };
   };
   report: any;
-  plan: Record<RoomId, { scheduledAt?: number; location: string; checkedIn: boolean; durationSec: number }>;
+  plan: Record<RoomId, { scheduledAt?: number; location: string; checkedIn: boolean; durationSec: number; after?: { room: RoomId; gapSec: number }; email?: string }>;
+  registered: Record<RoomId, boolean>;
   sequence: { order: RoomId[]; gapSec: number } | null;
   photos: Record<RoomId, number>;
 }

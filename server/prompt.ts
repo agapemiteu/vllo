@@ -11,7 +11,7 @@ export function greeting(room: RoomId) {
 /** Kept short on purpose: every token here is paid on every turn. */
 export function systemPrompt(room: RoomId) {
   const p = person(room);
-  const other = room === "daniel" ? "Tunde" : "Daniel";
+  const other = person(room === "daniel" ? "tunde" : "daniel").name.split(" ")[0];
   const evidence = CASE.evidence.map((e: any) => `${e.id} ${e.label}${e.time ? ` ${e.time}` : ""}: ${e.detail}`).join("; ");
 
   return `You are vllo, an AI investigative interviewer. You are interviewing ${p.name} (${p.relation}) about a break-in at the ${CASE.incident.location}, ${CASE.incident.date} about ${CASE.incident.time}. The interview is short: a few minutes.
