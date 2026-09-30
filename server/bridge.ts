@@ -1,6 +1,10 @@
 import WebSocket from "ws";
 import { first, store } from "./caseStore.js";
-import { checkAgentTranscript, checkUserTranscript, END_WORDS } from "./guardrails.js";
+import { checkAgentTranscript, checkQuestion, checkUserTranscript, END_WORDS } from "./guardrails.js";
+
+/** Never show or log anything that looks like code or a function call, whatever the model emits. */
+const TOOLISH = /\b[a-z]+_[a-z_]+\s*(\{[^}]*\}?|\([^)]*\)?)|[{}]/gi;
+export const clean = (t: string) => t.replace(TOOLISH, " ").replace(/\s+/g, " ").trim();
 import { agentFor, agentLlm } from "./agents.js";
 import { extractClaims, type Thread } from "./extractor.js";
 import { briefingFor } from "./briefing.js";
@@ -66,7 +70,8 @@ export class RoomBridge {
     const items = drainPending(this.room);
     if (!items.length) return;
     const lines = items.map((c) => `${c.id} (${c.type}, ${c.topic}): ${c.challenge_hint}`).join(" ");
-    this.addContext(`Case update. ${lines} Once their account is in, raise it next: call set_next_question with one open, neutral question. Never say where the information came from.`);
+    this.lastContext = "CHALLENGE";
+    this.addContext(`Case update. ${lines} Once their account is in, raise this next with one open, neutral question. Never say where the information came from.`);
   }
 
   private toolCtx(): ToolCtx {
@@ -80,6 +85,26 @@ export class RoomBridge {
   }
 
   private lastObjectives = "";
+  /** what the most recent between-turn context asked the agent to pursue */
+  private lastContext: "CHALLENGE" | "OBJECTIVE" | "THREAD" | null = null;
+
+  /** The agent's spoken question becomes the "asking because" line, and is checked against the conduct rules. */
+  private noteQuestion(text: string, interrupted: boolean) {
+    if (interrupted || this.ending) return;
+    const q = text.split(/(?<=[.!])\s+/).reverse().find((x) => x.includes("?"));
+    if (!q) return;
+    const reason = this.lastContext === "CHALLENGE" ? "CONFLICT" : this.lastContext === "THREAD" ? "NEW_DETAIL" : this.lastContext === "OBJECTIVE" ? "OBJECTIVE" : "FREE_ACCOUNT";
+    this.lastContext = null;
+    store.setRoom(this.room, { lastQuestion: { reason, question: q, sourceIds: [] } });
+    const verdict = checkQuestion(q, this.room);
+    if (verdict.ok) {
+      store.log(this.room, { kind: "gate", label: `Question checked · ${reason.replace(/_/g, " ").toLowerCase()}`, detail: `"${q}"`, status: "done" });
+    } else {
+      store.guard(this.room, verdict.rule, "FLAGGED", q);
+      store.log(this.room, { kind: "blocked", label: `Question flagged · ${verdict.rule.replace(/_/g, " ").toLowerCase()}`, detail: `"${q}"`, status: "error" });
+      this.addContext(`Correction for your next turn: ${verdict.instruction}`);
+    }
+  }
 
   /** What this interview still has to establish; the agent's next question should move one of these forward. */
   private pressObjectives() {
@@ -89,6 +114,7 @@ export class RoomBridge {
     const key = open.map((o) => o.id).join(",");
     if (!open.length || key === this.lastObjectives) return;
     this.lastObjectives = key;
+    if (this.lastContext !== "CHALLENGE") this.lastContext = "OBJECTIVE";
     this.addContext(`Still to establish: ${open.map((o) => o.text).join("; ")}. Make your next question move one of these forward: exact times, the vehicle, who they were with, and why they were there.`);
   }
 
@@ -112,6 +138,7 @@ export class RoomBridge {
       }
     }
     const top = fresh[0];
+    if (!this.lastContext) this.lastContext = "THREAD";
     this.addContext(`New thread to pull: ${top.text} (${top.kind}). When it fits, ask for specifics that can be independently verified: names, exact place, times, receipts, who else can confirm.`);
   }
 
@@ -247,7 +274,7 @@ export class RoomBridge {
         session: {
           system_prompt: this.prompt,
           greeting: greeting(this.room),
-          tools: AGENT_TOOLS,
+          ...(AGENT_TOOLS.length ? { tools: AGENT_TOOLS } : {}),
           input: { format: { encoding: "audio/pcm" }, keyterms: KEYTERMS },
           output: { voice: process.env.VLLO_VOICE || "charles", format: { encoding: "audio/pcm" } },
         },
@@ -421,7 +448,7 @@ export class RoomBridge {
               store.log(room, { kind: "end", label: "Server ended session (rights backstop)", detail: trigger.replace(/_/g, " "), status: "warn" });
               this.finish(trigger);
             }
-          }, 4000);
+          }, 2500);
         }
         break;
       }
@@ -447,13 +474,16 @@ export class RoomBridge {
           this.captionReply = ev.reply_id;
           store.setRoom(room, { caption: "" });
         }
-        store.setRoom(room, { caption: (this.state.caption ? this.state.caption + " " : "") + ev.delta });
+        store.setRoom(room, { caption: clean((this.state.caption ? this.state.caption + " " : "") + ev.delta) });
         break;
 
       case "transcript.agent": {
-        const text = String(ev.text ?? "").trim();
-        if (text) this.replyHadContent = true;
+        const raw = String(ev.text ?? "").trim();
+        if (raw) this.replyHadContent = true;
+        const text = clean(raw);
+        if (raw && text !== raw) upstreamLog[room].push(`sanitised agent text: ${raw.slice(0, 120)}`);
         if (!text) break;
+        this.noteQuestion(text, !!ev.interrupted);
         store.setRoom(room, { caption: text });
         this.lastAgentText = text;
         store.say(room, "agent", text, !!ev.interrupted);
@@ -488,7 +518,7 @@ export class RoomBridge {
             const nudge = setTimeout(() => {
               if (this.lastEvent !== "reply.done" || this.ending) return;
               upstreamLog[room].push("-> reply.create (empty reply nudge)");
-              this.sendUp({ type: "reply.create", instructions: "Continue the interview now: call set_next_question with your next open question, then ask it aloud." });
+              this.sendUp({ type: "reply.create", instructions: "Continue the interview now with your next short, open question." });
             }, 1200);
             void nudge;
           }

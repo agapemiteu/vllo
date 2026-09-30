@@ -58,14 +58,14 @@ Interview device (mic)  <-- WebSocket -->  Node server  <-- WebSocket -->  Assem
 Investigator page       <-- WebSocket -->      |
                                                |-- Groq: each answer -> structured claims
                                                |-- Rules: claims vs evidence and other accounts -> contradictions
-                                               |-- Guardrails: every challenge question checked before it is asked
+                                               |-- Guardrails: every question checked; rights stops enforced by the server
                                                '-- Report: built from recorded claims only
 ```
 
 - The browser streams 24 kHz audio to the server; the server holds the AssemblyAI connection, so the API key never reaches the browser.
 - After each answer, Groq turns it into claims (place, time, vehicle, companion, car handover). The rules compare them to the evidence and to other interviews.
 - New contradictions and still-open objectives are passed to the agent between turns, so its next question goes after them.
-- Questions that accuse, lead, pressure or name another person are blocked in code. Asking for a lawyer ends the interview, with a server-side backstop if the model does not.
+- Every question the agent asks is checked against conduct rules (no accusing, leading, pressure or naming another person); a breach is flagged and corrected on its next turn. Asking for a lawyer, refusing to continue or a welfare concern ends the interview, enforced by the server.
 
 ## Principles
 

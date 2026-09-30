@@ -108,11 +108,12 @@ export function releaseApproval(room: RoomId) {
 }
 
 /** Tools the voice agent sees. Claims are extracted server-side from every utterance instead. */
-export const AGENT_TOOLS = TOOLS.filter((t) => t.name === "set_next_question" || t.name === "end_interview").map((t) =>
-  t.name === "set_next_question"
-    ? { ...t, description: "Submit a challenge question (about a case update) before asking it. Speak it only if approved; otherwise follow the instruction and resubmit." }
-    : t,
-);
+/**
+ * Tools the voice model sees: none. The managed model sometimes spoke tool calls aloud
+ * ("set_next_question{...}"), so everything it needs arrives as between-turn context instead,
+ * and the server enforces the rules (question checks, rights stops) itself.
+ */
+export const AGENT_TOOLS: typeof TOOLS = [];
 
 export interface ToolCtx {
   end: (reason: string) => void;

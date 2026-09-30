@@ -217,7 +217,6 @@ export default function Room({ id }: { id: string }) {
             <motion.div key="ended" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center">
               <HugeiconsIcon icon={StopCircleIcon} size={28} className="text-stone-500" />
               <h1 className="mt-5 text-3xl font-semibold tracking-tight">This interview has ended.</h1>
-              {room?.endWords && <p className="mt-3 text-stone-400">{room.endWords}.</p>}
             </motion.div>
           )}
         </AnimatePresence>
