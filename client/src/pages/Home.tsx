@@ -9,10 +9,10 @@ import { useTick } from "@/components/Sequence";
 import { useConsole, type RoomId } from "@/lib/useConsole";
 
 const STEPS: [string, string][] = [
-  ["Register the person", "A name, a photo, what you already know. vllo gets a link to send them."],
-  ["vllo runs the interview", "A calm voice interviewer takes their account, follows every thread and asks for what can be verified."],
-  ["Every claim, cross-checked live", "Times, places, vehicles and companions become a timeline, checked against your evidence and every other account as they speak."],
-  ["The report, in your inbox", "Contradictions with both quotes, facts that hold, statements that changed, every line traced to who said it and when."],
+  ["Add who you’re speaking to", "Their name, a photo, what’s already on file. You get a link to send them."],
+  ["They talk, vllo listens", "It lets them tell it their way, then asks what a good detective would: where exactly, who saw you, why then."],
+  ["Checked the moment it’s said", "“I drove my own car” is checked against the camera that caught someone else’s. Now, not next week."],
+  ["A statement you can act on", "What held up, what changed, and what still doesn’t fit. Every line quoted and timed, sent to your email."],
 ];
 
 export default function Home() {
@@ -29,22 +29,22 @@ export default function Home() {
         {s && !full && (
           <a href="/new">
             <Button>
-              <HugeiconsIcon icon={Add01Icon} size={16} /> New investigation
+              <HugeiconsIcon icon={Add01Icon} size={16} /> Take a statement
             </Button>
           </a>
         )}
       </header>
 
       <main className="mx-auto max-w-3xl px-6 pt-10 pb-20">
-        <p className="text-[13px] font-medium tracking-wide text-amber-700">AI voice investigations</p>
-        <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">Interviews that investigate themselves.</h1>
+        <p className="text-[13px] font-medium tracking-wide text-amber-700">For investigators, claims teams and workplace inquiries</p>
+        <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">Find the contradiction while they’re still talking.</h1>
         <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-stone-600">
-          vllo holds the conversation by voice, turns every sentence into timestamped evidence, and checks it live against your case file and every other account. You get what holds up, what breaks, and why.
+          Today, statements get typed up after the interview and compared days later, if anyone has the time. vllo takes the statement by voice, checks each detail against your CCTV, phone records and the other statements as it’s said, and asks about the gap before they walk out.
         </p>
         {s && ids.length === 0 && (
           <a href="/new" className="mt-8 inline-block">
             <Button size="lg">
-              <HugeiconsIcon icon={Add01Icon} size={16} /> Start an investigation
+              <HugeiconsIcon icon={Add01Icon} size={16} /> Take a statement
             </Button>
           </a>
         )}
@@ -93,7 +93,7 @@ export default function Home() {
           ))}
         </ol>
         <p className="mt-5 text-[13px] text-muted-foreground">
-          Never accuses. Never reveals a source. Stops the moment a lawyer is requested. vllo reports contradictions, never guilt.
+          It never accuses anyone, never says who told it what, and stops the second someone asks for a lawyer. It points out what doesn’t add up. What that means is your call.
         </p>
 
         {s && ids.length > 0 && (

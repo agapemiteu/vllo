@@ -76,8 +76,8 @@ export default function New() {
       </header>
 
       <main className="mx-auto max-w-2xl px-6 pt-6 pb-24">
-        <h1 className="text-3xl font-semibold tracking-tight">New investigation</h1>
-        <p className="mt-2 text-[15px] text-muted-foreground">Who are you interviewing, and when.</p>
+        <h1 className="text-3xl font-semibold tracking-tight">Take a statement</h1>
+        <p className="mt-2 text-[15px] text-muted-foreground">Who you’re speaking to, and when.</p>
 
         {s && free.length === 0 && (
           <p className="mt-8 rounded-xl border bg-stone-50 p-4 text-[14px] text-stone-600">This case already has two people registered. Reset the demo from Investigations to start over.</p>
@@ -167,7 +167,7 @@ export default function New() {
                 <Button variant="ghost">Cancel</Button>
               </a>
               <Button size="lg" disabled={!name.trim() || busy} onClick={create}>
-                {busy ? "Creating" : "Create investigation"}
+                {busy ? "Setting up" : "Create the link"}
               </Button>
             </div>
           </>
