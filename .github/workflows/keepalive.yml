@@ -1,0 +1,13 @@
+name: keep backend awake
+
+# Render's free tier sleeps after 15 idle minutes; a cold start makes the first visit slow.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --max-time 60 https://vllo.onrender.com/healthz || true

@@ -26,7 +26,7 @@ export default function Home() {
     <div className="min-h-full bg-white">
       <header className="mx-auto flex max-w-3xl items-center justify-between px-6 py-6">
         <Logo />
-        {s && (
+        {(
           <a href="/new">
             <Button>
               <HugeiconsIcon icon={Add01Icon} size={16} /> Interview a suspect
@@ -49,7 +49,7 @@ export default function Home() {
             </span>
           ))}
         </div>
-        {s && (
+        {(
           <a href="/new" className="mt-8 inline-block">
             <Button size="lg">
               <HugeiconsIcon icon={Add01Icon} size={16} /> Interview a suspect
@@ -59,7 +59,7 @@ export default function Home() {
 
         {!s ? (
           <p className="mt-12 text-sm text-muted-foreground">
-            <span className="shimmer-text">Connecting</span>
+            <span className="shimmer-text">Waking up the server, this can take up to a minute</span>
           </p>
         ) : ids.length === 0 ? null : (
           <>
