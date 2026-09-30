@@ -39,10 +39,10 @@ export async function extractClaims(room: RoomId, utterance: string, lastQuestio
   const models = [process.env.GROQ_EXTRACT_MODEL || "openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"];
   let res: Response | null = null;
   for (const model of [...new Set(models)]) {
-    res = await call(model);
-    if (res.status !== 429) break;
+    res = await call(model).catch(() => null as any);
+    if (res?.ok) break;
   }
-  if (!res!.ok) throw new Error(`extract ${res!.status}: ${(await res!.text()).slice(0, 160)}`);
+  if (!res?.ok) throw new Error(`extract ${res?.status ?? "timeout"}: ${res ? (await res.text()).slice(0, 160) : ""}`);
   const data: any = await res!.json();
   const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? "{}");
   return Array.isArray(parsed.claims) ? parsed.claims.filter((c: any) => c && c.subject && c.value) : [];

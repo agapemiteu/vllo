@@ -111,7 +111,7 @@ export function evaluate(s: Store, triggerRoom: RoomId) {
       if (b.room === a.room || b.value !== "none") continue;
       if (!overlaps(a, b, 20)) continue;
       drafts.push({
-        key: `R4:${a.id}:${b.id}`, rule: "R4", type: "CROSS_ACCOUNT_CONFLICT", topic: "co-presence",
+        key: `R4:${b.id}`, rule: "R4", type: "CROSS_ACCOUNT_CONFLICT", topic: "co-presence",
         claimIds: [a.id, b.id], evidenceIds: [], rooms: [b.room],
         summary: `${name(a.room)} says they were together${a.time ? ` at ${a.time}` : ""} ("${a.quote}"). ${name(b.room)} says they were alone ("${b.quote}").`,
         challengeHint: HINTS.R4,

@@ -212,8 +212,22 @@ export class RoomBridge {
     this.sendUp({ type: "input.audio", audio: buf.toString("base64") });
   }
 
-  private flushIfIdle() {
-    if (this.lastEvent !== "reply.done" || !this.pendingResults.length) return;
+  private holdTimer: NodeJS.Timeout | null = null;
+
+  private flushIfIdle(force = false) {
+    if (!this.pendingResults.length) return;
+    if (!force && this.lastEvent !== "reply.done") {
+      // Held because the interviewee started talking. If no reply follows, the agent is waiting on us: release.
+      if (this.lastEvent !== "reply.started" && !this.holdTimer) {
+        this.holdTimer = setTimeout(() => {
+          this.holdTimer = null;
+          if (this.lastEvent !== "reply.started") this.flushIfIdle(true);
+        }, 1500);
+      }
+      return;
+    }
+    if (this.holdTimer) clearTimeout(this.holdTimer);
+    this.holdTimer = null;
     for (const t of this.pendingResults) {
       this.sendUp({ type: "tool.result", call_id: t.call_id, result: JSON.stringify(t.result) });
     }
