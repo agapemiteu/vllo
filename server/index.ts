@@ -16,8 +16,7 @@ const app = express();
 const dist = fileURLToPath(new URL("../dist", import.meta.url));
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
-app.get("/api/debug/:room", (req, res) => res.type("text").send((upstreamLog[req.params.room] ?? []).join("
-")));
+app.get("/api/debug/:room", (req, res) => res.type("text").send((upstreamLog[req.params.room] ?? []).join("\n")));
 
 // Person-of-interest photos, shared by every device (console, plan, room). Kept in memory for the demo.
 const photoData = new Map<RoomId, Buffer>();
