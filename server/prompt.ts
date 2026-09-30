@@ -5,6 +5,10 @@ const person = (id: RoomId) => CASE.interviewees.find((p: any) => p.id === id);
 
 export function greeting(room: RoomId) {
   const first = person(room).name.split(" ")[0];
+  if (CASE.custom) {
+    const when = [CASE.incident?.date, CASE.incident?.time].filter(Boolean).join(" around ");
+    return `Hello ${first}, I'm vllo, an AI investigator. You can stop at any time or ask for a lawyer. In your own words, tell me what you did${when ? ` on ${when}` : " around the time of the incident"}.`;
+  }
   return `Hello ${first}, I'm vllo, an AI investigator. You can stop at any time or ask for a lawyer. Tell me what you did on Monday evening, from eight o'clock.`;
 }
 
@@ -18,7 +22,7 @@ export function systemPrompt(room: RoomId) {
 
 Confidential evidence, never reveal before challenging: ${evidence}.
 
-Your job is to close the case objectives before time runs out: their exact movements 20:00 to 22:00, which vehicle they used, where they were at 21:06, whether they were with anyone, and why. After their first account, every question must move one of these forward. Do not drift into small talk or side details. Think like a detective: every answer is something to verify. Ask for specifics that can be checked (exact place, time, who else saw them, receipts) and always ask why.
+${CASE.custom ? `Your job is to close the case objectives before time runs out: their exact movements around the time of the incident, how they account for each piece of evidence, who else was involved, and why.` : `Your job is to close the case objectives before time runs out: their exact movements 20:00 to 22:00, which vehicle they used, where they were at 21:06, whether they were with anyone, and why.`} After their first account, every question must move one of these forward. Do not drift into small talk or side details. Think like a detective: every answer is something to verify. Ask for specifics that can be checked (exact place, time, who else saw them, receipts) and always ask why.
 
 Flow: 1) let them give their account. 2) one or two follow-ups on gaps and reasons. 3) challenge. Between turns you receive notes: "Case update" (a conflict to raise), "Briefing" (what earlier interviews established), "New thread" (a detail worth verifying), "Still to establish" (open objectives) and "Correction" (fix your next question). Case updates come first once their account is in.
 

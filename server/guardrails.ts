@@ -1,6 +1,6 @@
 import type { RoomId } from "./types.js";
 import { other } from "./types.js";
-import { first } from "./caseStore.js";
+import { CASE, first } from "./caseStore.js";
 
 interface Rule {
   id: string;
@@ -55,7 +55,12 @@ export function checkAgentTranscript(text: string, room: RoomId): string | null 
 
 /** Hard redaction for any agent-facing text about the other room. */
 export function redact(text: string) {
-  return text.replace(/\b(daniel|tunde)\b/gi, "another person");
+  // Sample names plus every registered first and last name, as whole words.
+  const names = ["daniel", "tunde", ...CASE.interviewees.flatMap((p: any) => String(p.name ?? "").split(/\s+/))]
+    .map((n) => n.replace(/[^\p{L}\p{N}'-]/gu, ""))
+    .filter((n) => n.length > 1)
+    .map(escape);
+  return text.replace(new RegExp(`\\b(${names.join("|")})\\b`, "giu"), "another person");
 }
 
 export const END_WORDS: Record<string, string> = {

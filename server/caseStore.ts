@@ -2,22 +2,36 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { insights } from "./insights.js";
+import { current, setFallback } from "./context.js";
 import type {
   Activity, Claim, Conflict, Gap, GuardrailEvent, Intel, Lead, Objective, Revision, RoomId, RoomState, SessionPlan,
 } from "./types.js";
 
-export const CASE = JSON.parse(
-  readFileSync(fileURLToPath(new URL("./case/case_024.json", import.meta.url)), "utf8"),
-);
+const SAMPLE = readFileSync(fileURLToPath(new URL("./case/case_024.json", import.meta.url)), "utf8");
 
-/** Default profiles, so a full reset restores the sample subjects. */
-const DEFAULT_PEOPLE = JSON.parse(JSON.stringify(CASE.interviewees));
+/** A fresh copy of the sample case file (each workspace owns and may edit its own). */
+export const sampleCase = () => JSON.parse(SAMPLE);
+
+/** The current workspace's case file. Reads and writes go to whichever workspace this code path runs in. */
+export const CASE: any = new Proxy(
+  {},
+  {
+    get: (_t, k) => current().store.caseFile[k],
+    set: (_t, k, v) => ((current().store.caseFile[k] = v), true),
+    has: (_t, k) => k in current().store.caseFile,
+    ownKeys: () => Reflect.ownKeys(current().store.caseFile),
+    getOwnPropertyDescriptor: (_t, k) => {
+      const d = Reflect.getOwnPropertyDescriptor(current().store.caseFile, k);
+      return d ? { ...d, configurable: true } : undefined;
+    },
+  },
+);
 
 /** Registered display name (first name) for a role, used in every console-facing sentence. */
 export const first = (r: RoomId) => String(CASE.interviewees.find((p: any) => p.id === r)?.name ?? r).split(" ")[0];
 
 export function restoreDefaultPeople() {
-  CASE.interviewees = JSON.parse(JSON.stringify(DEFAULT_PEOPLE));
+  CASE.interviewees = sampleCase().interviewees;
 }
 
 export interface TranscriptLine {
@@ -32,7 +46,8 @@ function freshRoom(id: RoomId): RoomState {
   return { id, status: "IDLE", agentState: "LISTENING", caption: "", userPartial: "", mode: "auto" };
 }
 
-class CaseStore extends EventEmitter {
+export class CaseStore extends EventEmitter {
+  caseFile: any;
   rooms!: Record<RoomId, RoomState>;
   claims!: Claim[];
   conflicts!: Conflict[];
@@ -61,8 +76,10 @@ class CaseStore extends EventEmitter {
   private seq!: Record<string, number>;
   private timer: NodeJS.Timeout | null = null;
 
-  constructor() {
+  constructor(caseFile: any = sampleCase()) {
     super();
+    this.setMaxListeners(50);
+    this.caseFile = caseFile;
     this.reset();
   }
 
@@ -78,7 +95,7 @@ class CaseStore extends EventEmitter {
     this.gaps = [];
     this.leads = [];
     this.intel = [];
-    this.objectives = CASE.objectives.map((o: any) => ({ ...o, resolved: false }));
+    this.objectives = (this.caseFile.objectives ?? []).map((o: any) => ({ ...o, resolved: false }));
     this.pending = { daniel: [], tunde: [] };
     this.report = null;
     this.seq = {};
@@ -160,7 +177,7 @@ class CaseStore extends EventEmitter {
 
   snapshot() {
     return {
-      case: CASE,
+      case: this.caseFile,
       now: Date.now(),
       rooms: this.rooms,
       claims: this.claims,
@@ -183,5 +200,18 @@ class CaseStore extends EventEmitter {
   }
 }
 
-export const store = new CaseStore();
 export type Store = CaseStore;
+
+// Scripts and tests without a workspace run against one default store.
+let defaultCtx: { id: string; store: CaseStore } | null = null;
+setFallback(() => (defaultCtx ??= { id: "default", store: new CaseStore() }));
+
+/** The current workspace's store (see context.ts). */
+export const store: CaseStore = new Proxy({} as CaseStore, {
+  get: (_t, k) => {
+    const s = current().store;
+    const v = s[k];
+    return typeof v === "function" ? v.bind(s) : v;
+  },
+  set: (_t, k, v) => ((current().store[k] = v), true),
+});

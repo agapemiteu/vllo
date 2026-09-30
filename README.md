@@ -21,12 +21,13 @@ Built for investigators, HR teams, legal and compliance teams, insurers and any 
 
 1. Open https://vllo.vercel.app and click **Interview a suspect**.
 2. Tap a sample person (Daniel O. or Tunde A.) or fill in your own. Add a photo if you like.
+   Or choose **My own case**: a title, date, time, place, what happened, and your evidence (one item per line). Answers are then checked against your evidence.
 3. Choose when: **as soon as they check in**, in 1 or 5 minutes, or after another interview finishes.
 4. Choose how long: 1, 1.5 or 2 minutes (1.5 recommended).
 5. Click **Create the link**. On the next page, scan the QR code with a phone, or click **Open interview room**.
 6. On the interview device, tap **Check in**. The interview starts by itself.
 7. Watch the investigation page: what vllo hears, what it checks, contradictions as they appear, and the question it is asking and why.
-8. When it ends, click **View full report** or **Email report**.
+8. When it ends, click **Download PDF**, or type an email address and click **Email** to get the PDF in your inbox.
 
 The demo includes one sample case with evidence on file. Answer in your own words; when an answer conflicts with the evidence, the contradiction appears on the investigation page and vllo asks about it.
 
@@ -37,11 +38,14 @@ The demo includes one sample case with evidence on file. Answer in your own word
 | First page load is slow | The backend runs on Render's free tier and sleeps when idle. Wait up to a minute. |
 | Interview does not start after check-in | Refresh the room page and tap Check in again. |
 | The agent interrupts itself | Use headphones. Speaker sound is picked up as the person talking. |
-| Registrations or photos disappeared | The server keeps state in memory; a restart clears it. Register again. The interview link still works on its own. |
-| Start over | "Reset demo" at the bottom of the Investigations page. |
-| Email report | Opens your mail app with the report written. Automatic sending needs an email provider and is not set up. |
+| An old link says it isn't available | The server restarted or the investigation expired. Start a new one from the home page. |
+| Start over | Once every interview in an investigation has finished, the home page starts a fresh one. "Reset demo" does it at any time. |
+| Email didn't arrive | The PDF downloads instead whenever email can't be sent. Check spam; sending needs the server's Brevo settings. |
+| Microphone blocked or missing | The room says exactly what to fix (permission, no mic, mic in use, unsupported browser). |
 
-Other limits: the conflict rules are written for one demo case (case 024, a warehouse break-in) with two roles; evidence is synthetic; desktop Chrome and mobile Chrome/Safari are tested.
+Other limits: the sample case uses hand-written, deterministic contradiction rules; your own cases are checked by a language model against the evidence you type in. Up to two people per investigation. Desktop Chrome and mobile Chrome/Safari are tested.
+
+Every visitor works in their own isolated investigation, so several people can test at the same time without seeing each other's data.
 
 ## Tech used
 
@@ -82,6 +86,7 @@ npm install
 cp .env.example .env     # add ASSEMBLYAI_API_KEY and GROQ_API_KEY
 npm run dev              # server on :8787, app on :5173
 npm run smoke            # tests the rules, no audio needed
+npx tsx scripts/hardening.ts   # isolation, scheduling, custom cases, PDF, bad input
 ```
 
 | Variable | Purpose |
@@ -89,4 +94,5 @@ npm run smoke            # tests the rules, no audio needed
 | `ASSEMBLYAI_API_KEY` | Voice Agent API (required) |
 | `GROQ_API_KEY` | Claim extraction and web checks |
 | `VLLO_LLM` | `managed` (default), `groq` or `gateway`: which model runs the voice agent |
+| `BREVO_API_KEY`, `REPORT_FROM_EMAIL` | Emailing the PDF report (Brevo free plan; the sender must be verified in Brevo) |
 | `VITE_API_URL` | Backend URL when the frontend is hosted separately (defaults to the Render backend on vercel.app) |

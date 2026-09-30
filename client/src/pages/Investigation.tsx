@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 import { motion, AnimatePresence } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  AlertDiamondIcon, ArrowLeft01Icon, ArrowUpRight01Icon, Mail01Icon, CheckmarkCircle02Icon, Copy01Icon, FileValidationIcon, PlayIcon, StopCircleIcon,
+  AlertDiamondIcon, ArrowLeft01Icon, ArrowUpRight01Icon, CheckmarkCircle02Icon, Copy01Icon, Download04Icon, FileValidationIcon, Mail01Icon, PlayIcon, StopCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
@@ -14,45 +14,63 @@ import { Pill, firstName, status } from "@/components/Status";
 import { useTick } from "@/components/Sequence";
 import { cn, pretty } from "@/lib/utils";
 import { useConsole, type RoomId, type Snapshot } from "@/lib/useConsole";
+import { postJson, roomLink, slotOf, startFreshWorkspace, wsApi } from "@/lib/workspace";
 
 function QR({ value }: { value: string }) {
   const [src, setSrc] = useState("");
   useEffect(() => {
-    QRCode.toDataURL(value, { margin: 1, width: 240, color: { dark: "#1c1917", light: "#ffffff" } }).then(setSrc);
+    QRCode.toDataURL(value, { margin: 1, width: 240, color: { dark: "#1c1917", light: "#ffffff" } }).then(setSrc, () => setSrc(""));
   }, [value]);
   return src ? <img src={src} alt="Interview link QR code" className="size-32 shrink-0 rounded-xl border bg-white p-1.5" /> : <div className="size-32 shrink-0 rounded-xl border bg-white" />;
 }
 
-/** Plain-text report for the investigator's mail app. Sending via the user's own mail client needs no mail service. */
-function mailto(s: Snapshot, id: RoomId) {
-  const p = s.case.interviewees.find((x: any) => x.id === id);
-  const conflicts = s.conflicts.filter((c) => c.rooms.includes(id) || c.claimIds.some((cid) => s.claims.find((x) => x.id === cid)?.room === id));
-  const facts = s.insights.facts.filter((f) => f.sources.some((sid) => s.claims.find((x) => x.id === sid)?.room === id));
-  const said = s.claims.filter((c) => c.room === id && c.status === "ACTIVE");
-  const lines = [
-    `vllo interview report: ${p.name}`,
-    `${s.case.title} (case ${s.case.case_id}), ${s.case.incident.date} ${s.case.incident.time}`,
-    `Ended: ${pretty(s.rooms[id].endReason ?? "")}`,
-    "",
-    "CONTRADICTIONS",
-    ...(conflicts.length ? conflicts.map((c) => `- [${c.status === "OPEN" ? "open" : "resolved"}] ${c.topic}: ${c.summary}`) : ["- none"]),
-    "",
-    "ESTABLISHED",
-    ...(facts.length ? facts.map((f) => `- ${f.text}`) : ["- nothing corroborated yet"]),
-    "",
-    "WHAT THEY SAID",
-    ...said.map((c) => `- ${c.time ? c.time + " " : ""}${pretty(c.subject)}: "${c.quote}"`),
-    "",
-    `Full report: ${location.origin}/i/${id}`,
-    "",
-    "vllo reports conflicts between statements and evidence. It does not assess truthfulness, emotion or guilt.",
-  ];
-  const to = s.plan[id].email ?? "";
-  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(`vllo report: ${p.name}`)}&body=${encodeURIComponent(lines.join("\n"))}`;
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/;
+
+/** PDF download always works; email sends through the server and falls back to the download on any failure. */
+function ReportActions({ ws, id, s }: { ws: string; id: RoomId; s: Snapshot }) {
+  const [to, setTo] = useState(s.plan[id].email ?? "");
+  const [state, setState] = useState<{ kind: "idle" | "sending" | "sent" | "failed"; msg?: string }>({ kind: "idle" });
+  const pdf = wsApi(ws, `/report/${slotOf(id)}.pdf`);
+
+  async function send() {
+    if (!EMAIL.test(to.trim())) return setState({ kind: "failed", msg: "That email address doesn't look right." });
+    setState({ kind: "sending" });
+    const r = await postJson(wsApi(ws, `/email/${slotOf(id)}`), { to: to.trim() }, 40_000);
+    if (r.ok) return setState({ kind: "sent", msg: `Sent to ${to.trim()}. Check the inbox (and spam) in a minute.` });
+    setState({ kind: "failed", msg: r.data?.error ?? "The email couldn't be sent, so the report was downloaded instead." });
+    if (r.status !== 400 && r.status !== 429) window.location.assign(pdf);
+  }
+
+  return (
+    <div className="space-y-3 rounded-2xl border p-4">
+      <div className="text-[13px] font-medium">Interview report</div>
+      <a href={pdf} className="block">
+        <Button className="w-full">
+          <HugeiconsIcon icon={Download04Icon} size={15} /> Download PDF
+        </Button>
+      </a>
+      <div className="flex gap-2">
+        <input
+          type="email"
+          inputMode="email"
+          value={to}
+          maxLength={200}
+          onChange={(e) => setTo(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="you@example.com"
+          className="h-10 min-w-0 flex-1 rounded-lg border bg-white px-3 text-[14px] outline-none focus:ring-2 focus:ring-stone-300"
+        />
+        <Button variant="outline" className="h-10" disabled={state.kind === "sending"} onClick={send}>
+          <HugeiconsIcon icon={Mail01Icon} size={15} /> {state.kind === "sending" ? "Sending" : "Email"}
+        </Button>
+      </div>
+      {state.msg && <p className={cn("text-[13px]", state.kind === "sent" ? "text-emerald-700" : "text-amber-800")}>{state.msg}</p>}
+    </div>
+  );
 }
 
-export default function Investigation({ id }: { id: RoomId }) {
-  const { state: s, send } = useConsole();
+export default function Investigation({ ws, slot }: { ws: string; slot: RoomId | null }) {
+  const { state: s, send } = useConsole(ws);
   const [copied, setCopied] = useState(false);
   const [wantReport, setWantReport] = useState(false);
   const reportRef = useRef<HTMLElement>(null);
@@ -67,8 +85,27 @@ export default function Investigation({ id }: { id: RoomId }) {
 
   if (!s)
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        <span className="shimmer-text">Connecting</span>
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        <span className="shimmer-text">Waking up the server, this can take up to a minute</span>
+      </div>
+    );
+
+  // No slot in the link: open whoever is registered first.
+  const id: RoomId | undefined = slot ?? (["daniel", "tunde"] as RoomId[]).find((r) => s.registered[r] || s.claims.some((c) => c.room === r));
+  const exists = !!id && (s.registered[id] || s.rooms[id].status !== "IDLE" || s.claims.some((c) => c.room === id));
+  if (!id || !exists)
+    return (
+      <div className="flex min-h-full flex-col items-center justify-center gap-4 px-6 text-center">
+        <Logo />
+        <h1 className="mt-4 text-2xl font-semibold tracking-tight">This investigation isn’t available anymore</h1>
+        <p className="max-w-md text-[15px] text-muted-foreground">It may have expired or the server restarted. Start a new one; it only takes a minute.</p>
+        <a
+          href="/new"
+          onClick={() => startFreshWorkspace()}
+          className="mt-2"
+        >
+          <Button size="lg">Interview a suspect</Button>
+        </a>
       </div>
     );
 
@@ -77,11 +114,12 @@ export default function Investigation({ id }: { id: RoomId }) {
   const plan = s.plan[id];
   const st = status(s, id);
   const first = firstName(s, id);
-  const link = `${location.origin}/room/${id}`;
+  const link = roomLink(ws, id);
   const activity = s.activity.filter((a) => a.room === id);
   const conflicts = s.conflicts.filter((c) => c.rooms.includes(id) || c.claimIds.some((cid) => s.claims.find((x) => x.id === cid)?.room === id));
   const facts = s.insights.facts.filter((f) => f.sources.some((sid) => s.claims.find((x) => x.id === sid)?.room === id));
   const ended = room.status === "ENDED";
+  const interrupted = room.status === "DISCONNECTED";
 
   return (
     <div className="flex min-h-full flex-col bg-white">
@@ -97,13 +135,13 @@ export default function Investigation({ id }: { id: RoomId }) {
         <section className="flex flex-wrap items-center gap-6">
           <Face id={id} name={p.name} square className="size-16 sm:size-24" />
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight">{p.name}</h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-semibold tracking-tight break-words">{p.name}</h1>
               <Pill tone={st.tone}>{st.label}</Pill>
             </div>
             <p className="mt-1 text-[14px] text-muted-foreground">{p.relation}</p>
             <p className="mt-1 text-[13px] text-muted-foreground">
-              {s.case.title} · {plan.durationSec / 60} minute interview
+              {s.case.title} · {Math.round((plan.durationSec / 60) * 10) / 10} minute interview
             </p>
           </div>
           <div className="w-full text-left sm:w-auto sm:text-right">
@@ -114,13 +152,13 @@ export default function Investigation({ id }: { id: RoomId }) {
               {st.key === "live" ? "remaining" : st.key === "scheduled" ? "until the interview starts" : st.timer}
             </div>
             <div className="mt-3 flex gap-2 sm:justify-end">
-              {room.status === "IDLE" && !plan.armed && (
-                <Button size="sm" onClick={() => send({ type: "start_room", room: id })}>
-                  <HugeiconsIcon icon={PlayIcon} size={13} /> {plan.checkedIn ? "Start now" : "Start when they join"}
+              {(room.status === "IDLE" && !plan.armed) || interrupted ? (
+                <Button size="sm" onClick={() => send({ type: "start_room", room: slotOf(id) })}>
+                  <HugeiconsIcon icon={PlayIcon} size={13} /> {interrupted ? "Restart interview" : plan.checkedIn ? "Start now" : "Start when they join"}
                 </Button>
-              )}
+              ) : null}
               {st.key === "live" && (
-                <Button size="sm" variant="outline" onClick={() => send({ type: "end_room", room: id })}>
+                <Button size="sm" variant="outline" onClick={() => send({ type: "end_room", room: slotOf(id) })}>
                   <HugeiconsIcon icon={StopCircleIcon} size={14} /> End
                 </Button>
               )}
@@ -130,44 +168,54 @@ export default function Investigation({ id }: { id: RoomId }) {
 
         {st.key === "live" && (
           <div className="mt-5 h-1 overflow-hidden rounded-full bg-stone-100">
-            <motion.div className="h-full bg-emerald-500" animate={{ width: `${Math.min(100, (st.progress ?? 0) * 100)}%` }} transition={{ ease: "linear", duration: 0.5 }} />
+            <motion.div className="h-full bg-emerald-500" animate={{ width: `${Math.min(100, Math.max(0, (st.progress ?? 0) * 100))}%` }} transition={{ ease: "linear", duration: 0.5 }} />
           </div>
         )}
 
+        {interrupted && (
+          <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[14px] text-amber-900">
+            The connection to the interviewer was lost. What was said so far is kept. Restart the interview; {first} will need to tap Check in again.
+          </p>
+        )}
+
         {/* Invite */}
-        {room.status === "IDLE" && (
+        {(room.status === "IDLE" || interrupted) && (
           <section className="mt-8 rounded-2xl border bg-stone-50 p-5">
             <div className="flex flex-col gap-5 sm:flex-row">
-            <QR value={link} />
-            <div className="min-w-0 flex-1">
-            <div className="text-[14px] font-medium">Next: {first} opens this link</div>
-            <p className="mt-0.5 text-[13px] text-muted-foreground">
-              Scan it with the phone {first} will use, send it, or open it here to try it yourself. Headphones recommended.
-            </p>
-            <div className="mt-3 flex gap-2">
-              <input readOnly value={link} className="h-10 min-w-0 flex-1 rounded-lg border bg-white px-3 font-mono text-[13px] text-stone-700" onFocus={(e) => e.target.select()} />
-              <Button
-                variant="outline"
-                className="h-10"
-                onClick={() => {
-                  navigator.clipboard.writeText(link);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                }}
-              >
-                <HugeiconsIcon icon={copied ? CheckmarkCircle02Icon : Copy01Icon} size={15} /> {copied ? "Copied" : "Copy"}
-              </Button>
-            </div>
-            <div className="mt-3 flex items-center gap-2 text-[13px]">
-              <span className={cn("size-2 rounded-full", plan.checkedIn ? "bg-emerald-500" : "bg-stone-300")} />
-              {plan.checkedIn ? `${first} has checked in` : `Waiting for ${first} to open the link`}
-            </div>
-            <a href={link} target="_blank" rel="noreferrer" className="mt-4 inline-block">
-              <Button>
-                <HugeiconsIcon icon={ArrowUpRight01Icon} size={15} /> Open interview room
-              </Button>
-            </a>
-            </div>
+              <QR value={link} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[14px] font-medium">Next: {first} opens this link</div>
+                <p className="mt-0.5 text-[13px] text-muted-foreground">
+                  Scan it with the phone {first} will use, send it, or open it here to try it yourself. Headphones recommended.
+                </p>
+                <div className="mt-3 flex gap-2">
+                  <input readOnly value={link} className="h-10 min-w-0 flex-1 rounded-lg border bg-white px-3 font-mono text-[13px] text-stone-700" onFocus={(e) => e.target.select()} />
+                  <Button
+                    variant="outline"
+                    className="h-10"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(link).then(
+                        () => {
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        },
+                        () => {},
+                      );
+                    }}
+                  >
+                    <HugeiconsIcon icon={copied ? CheckmarkCircle02Icon : Copy01Icon} size={15} /> {copied ? "Copied" : "Copy"}
+                  </Button>
+                </div>
+                <div className="mt-3 flex items-center gap-2 text-[13px]">
+                  <span className={cn("size-2 rounded-full", plan.checkedIn ? "bg-emerald-500" : "bg-stone-300")} />
+                  {plan.checkedIn ? `${first} has checked in` : `Waiting for ${first} to open the link`}
+                </div>
+                <a href={link} target="_blank" rel="noreferrer" className="mt-4 inline-block">
+                  <Button>
+                    <HugeiconsIcon icon={ArrowUpRight01Icon} size={15} /> Open interview room
+                  </Button>
+                </a>
+              </div>
             </div>
           </section>
         )}
@@ -223,25 +271,25 @@ export default function Investigation({ id }: { id: RoomId }) {
                 </ul>
               </div>
             )}
-            {ended && (
-              <div className="space-y-2">
-                <a href={mailto(s, id)} className="block">
-                  <Button className="w-full">
-                    <HugeiconsIcon icon={Mail01Icon} size={15} /> {plan.email ? `Email report to ${plan.email}` : "Email report"}
-                  </Button>
-                </a>
-                <Button variant="outline" className="w-full" onClick={() => {
+            {(ended || interrupted) && (
+              <>
+                <ReportActions ws={ws} id={id} s={s} />
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => {
                     if (!s.report) send({ type: "report" });
                     setWantReport(true);
-                  }}>
-                  <HugeiconsIcon icon={FileValidationIcon} size={15} /> View full report
+                  }}
+                >
+                  <HugeiconsIcon icon={FileValidationIcon} size={15} /> View the report here
                 </Button>
-              </div>
+              </>
             )}
           </div>
         </section>
 
-        {s.report && ended && (
+        {s.report && (ended || interrupted) && (
           <section ref={reportRef} className="mt-8 scroll-mt-4 overflow-hidden rounded-2xl border">
             <Report r={s.report} onClose={() => send({ type: "close_report" })} />
           </section>

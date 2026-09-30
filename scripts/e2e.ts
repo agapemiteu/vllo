@@ -5,17 +5,22 @@ import WebSocket from "ws";
 
 const room = process.argv[2] ?? "daniel";
 const host = process.argv[3] ?? "ws://localhost:8787";
-// "seq": just check in and wait for the sequence to reach this room (someone else sends run_sequence)
+// "seq": just check in and wait for the server to start it (someone registered it already)
 const seqMode = process.argv[4] === "seq";
-const files = [1, 2, 3, 4].map((i) => new URL(`./audio/${room}${i}.wav`, import.meta.url));
+// workspace (5th arg) and URL slot for the room
+const workspace = process.argv[5] ?? "e2etest01";
+const slot = room === "daniel" ? "p1" : "p2";
+// 6th arg: recording set to play (defaults to the role name, e.g. daniel1..4.wav)
+const voice = process.argv[6] ?? room;
+const files = [1, 2, 3, 4].map((i) => new URL(`./audio/${voice}${i}.wav`, import.meta.url));
 const pcm = files.map((f) => readFileSync(f).subarray(44)); // strip WAV header
 const CHUNK = 4800; // 100 ms at 24 kHz, 16-bit mono
 const silence = Buffer.alloc(CHUNK);
 const t0 = Date.now();
 const ts = () => `${((Date.now() - t0) / 1000).toFixed(1)}s`;
 
-const sock = new WebSocket(`${host}/ws/room/${room}`);
-const con = new WebSocket(`${host}/ws/console`);
+const sock = new WebSocket(`${host}/ws/w/${workspace}/room/${slot}`);
+const con = new WebSocket(`${host}/ws/w/${workspace}/console`);
 let seen = 0, agentLines = 0;
 con.on("message", (raw) => {
   const msg = JSON.parse(String(raw));
@@ -48,7 +53,7 @@ sock.on("open", async () => {
   // Real flow: the room device checks in, the investigator schedules a slot, the scheduler kicks it off.
   sock.send(JSON.stringify({ type: "checkin" }));
   await sleep(300);
-  if (!seqMode) con.send(JSON.stringify({ type: "schedule", room, in: 5000 }));
+  if (!seqMode) con.send(JSON.stringify({ type: "start_room", room: slot }));
   console.log(ts(), seqMode ? "checked in, waiting for the sequence" : "checked in, slot in 5s");
   await silenceUntil(() => agentLines >= 1, seqMode ? 420000 : 40000);
   await silenceUntil(() => false, 1500);

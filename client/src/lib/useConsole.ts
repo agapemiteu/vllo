@@ -33,7 +33,8 @@ export interface Snapshot {
   photos: Record<RoomId, number>;
 }
 
-export function useConsole() {
+/** Live state of one workspace. Reconnects on its own; switching workspace reconnects there. */
+export function useConsole(workspace: string) {
   const [state, setState] = useState<Snapshot | null>(null);
   const [connected, setConnected] = useState(false);
   const ws = useRef<WebSocket | null>(null);
@@ -42,13 +43,18 @@ export function useConsole() {
     let alive = true;
     let retry: ReturnType<typeof setTimeout>;
     const open = () => {
-      const sock = new WebSocket(wsUrl("/ws/console"));
+      const sock = new WebSocket(wsUrl(`/ws/w/${workspace}/console`));
       ws.current = sock;
       sock.onopen = () => setConnected(true);
       sock.onmessage = (e) => {
-        const msg = JSON.parse(e.data);
-        if (msg.type === "snapshot") {
-          setPhotoVersions(msg.state.photos ?? {});
+        let msg: any;
+        try {
+          msg = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+        if (msg?.type === "snapshot" && msg.state?.rooms) {
+          setPhotoVersions(workspace, msg.state.photos ?? {});
           syncClock(msg.state.now);
           setState(msg.state);
         }
@@ -58,13 +64,14 @@ export function useConsole() {
         if (alive) retry = setTimeout(open, 1000);
       };
     };
+    setState(null);
     open();
     return () => {
       alive = false;
       clearTimeout(retry);
       ws.current?.close();
     };
-  }, []);
+  }, [workspace]);
 
   const send = (msg: unknown) => ws.current?.readyState === WebSocket.OPEN && ws.current.send(JSON.stringify(msg));
   return { state, connected, send };

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ProcessFeed } from "@/components/ProcessFeed";
 import { Approval, Direct, ModeToggle } from "@/components/Assist";
 import { uploadPhoto, usePhoto } from "@/components/Face";
+import { activeWorkspace } from "@/lib/workspace";
 import { avatar, cn, mmss, pretty } from "@/lib/utils";
 import type { RoomId, Snapshot } from "@/lib/useConsole";
 
@@ -89,7 +90,7 @@ export function RoomColumn({
           hidden
           onChange={async (e) => {
             const f = e.target.files?.[0];
-            if (f) await uploadPhoto(id, f);
+            if (f) await uploadPhoto(activeWorkspace(), id, f).catch(() => {});
             e.target.value = "";
           }}
         />

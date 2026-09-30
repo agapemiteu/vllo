@@ -1,7 +1,8 @@
 import type { Claim, Conflict, Gap, RoomId } from "./types.js";
 import { ROOMS } from "./types.js";
 import type { Store } from "./caseStore.js";
-import { first } from "./caseStore.js";
+import { CASE, first } from "./caseStore.js";
+import { updateCustomObjectives } from "./checker.js";
 
 export const toMin = (t?: string) => {
   if (!t) return null;
@@ -10,7 +11,8 @@ export const toMin = (t?: string) => {
 };
 const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
-const WINDOW = { start: toMin("20:00")!, end: toMin("22:00")! };
+/** The time window the case cares about (the sample: 20:00-22:00). */
+const windowOf = () => ({ start: toMin(CASE.window?.start) ?? 0, end: toMin(CASE.window?.end) ?? 1439 });
 
 export const HINTS = {
   R1: "Records place their phone near Admiralty Way at 21:06. Ask them neutrally to help you understand that.",
@@ -56,6 +58,12 @@ type Draft = Omit<Conflict, "id" | "status" | "createdAt">;
  * queues new conflicts for delivery to the rooms that should be told. Returns newly created + newly resolved.
  */
 export function evaluate(s: Store, triggerRoom: RoomId) {
+  // An investigator's own case has no hand-written rules: gaps and objectives here, contradictions in checker.ts.
+  if (CASE.custom) {
+    s.gaps = computeGaps(s);
+    updateCustomObjectives();
+    return { created: [] as Conflict[], resolved: [] as Conflict[] };
+  }
   const drafts: Draft[] = [];
   const resolvedBy: Record<string, string | null> = {};
 
@@ -195,7 +203,7 @@ export function computeGaps(s: Store): Gap[] {
     const spans = active(s)
       .filter((c) => c.about === p && toMin(c.time) != null)
       .map((c) => [toMin(c.time)!, toMin(c.timeEnd) ?? toMin(c.time)!] as [number, number])
-      .filter(([a, b]) => b >= WINDOW.start && a <= WINDOW.end)
+      .filter(([a, b]) => b >= windowOf().start && a <= windowOf().end)
       .sort((x, y) => x[0] - y[0]);
     let cursor: number | null = null;
     for (const [a, b] of spans) {

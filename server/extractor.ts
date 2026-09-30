@@ -2,7 +2,7 @@
  * Claim extraction on every finished interviewee utterance (Groq, JSON mode).
  * The voice agent never has to remember to record facts; the conflict engine gets structured claims either way.
  */
-import { store } from "./caseStore.js";
+import { CASE, store } from "./caseStore.js";
 import type { RoomId } from "./types.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -30,6 +30,24 @@ quote: the speaker's exact words for that fact.
 revises_claim_id: if the speaker corrects or contradicts one of their EARLIER claims listed below on the same subject, give that claim's id.
 Follow-ups: if the utterance only adds a time or detail to an earlier claim (previous utterance "I went back to the warehouse", this one "around five past nine"), restate that full claim with the new time and set revises_claim_id to it.
 One claim per fact. Never invent facts. Output JSON only.`;
+
+/** The same job for an investigator's own case: no fixed value lists, the case and people come from the case file. */
+function customSystem() {
+  const people = CASE.interviewees.map((p: any) => `${p.id} = ${p.name}`).join(", ");
+  return `You extract factual claims from one utterance in an investigative interview. Case: ${CASE.title}. ${CASE.summary ?? ""} Incident: ${CASE.incident?.date ?? ""} ${CASE.incident?.time ?? ""} at ${CASE.incident?.location ?? ""}. People (id = name): ${people}.
+
+Return JSON: {"claims":[{"subject","about","value","time","time_end","quote","revises_claim_id"}], "threads":[{"kind","text","why"}]}. Use empty arrays when there is nothing.
+
+subject: location | vehicle | companion | activity | other.
+value: a short plain phrase (2-6 words) for the fact, e.g. "at home", "own blue car", "alone", "with the manager", "left the office".
+about: the id of the person the claim describes, usually the speaker.
+time: 24h HH:MM only if stated or clearly implied; otherwise omit.
+time_end: end of a stated duration, HH:MM.
+quote: the speaker's exact words for that fact.
+revises_claim_id: if the speaker corrects one of their EARLIER claims listed below on the same subject, that claim's id.
+threads: at most ONE new, concrete thing that could be independently checked (a third party, a named place or business, an object that leaves a trace like a receipt). kind is person | place | business | object | reason. Never a thread for the people above, a request for a lawyer, or anything already claimed.
+One claim per fact. Never invent facts. Output JSON only.`;
+}
 
 export interface Thread {
   kind: "person" | "place" | "business" | "object" | "reason";
@@ -71,7 +89,7 @@ export async function extractClaims(room: RoomId, utterance: string, lastQuestio
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: SYSTEM },
+        { role: "system", content: CASE.custom ? customSystem() : SYSTEM },
         {
           role: "user",
           content: `Speaker: ${room}\nInterviewer's last question: ${lastQuestion ?? "(opening: describe Monday evening from 8pm)"}\nSpeaker's previous utterance: ${previous ? `"${previous}"` : "(none)"}\nSpeaker's earlier claims:\n${earlier || "(none)"}\n\nUtterance: "${utterance}"`,

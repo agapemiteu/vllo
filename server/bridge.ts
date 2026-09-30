@@ -1,5 +1,6 @@
 import WebSocket from "ws";
-import { first, store } from "./caseStore.js";
+import { CASE, first, store } from "./caseStore.js";
+import { current, runIn, type Ctx } from "./context.js";
 import { checkAgentTranscript, checkQuestion, checkUserTranscript, END_WORDS } from "./guardrails.js";
 
 /** Never show or log anything that looks like code or a function call, whatever the model emits. */
@@ -8,6 +9,7 @@ export const clean = (t: string) => t.replace(TOOLISH, " ").replace(/\s+/g, " ")
 import { agentFor, agentLlm } from "./agents.js";
 import { extractClaims, type Thread } from "./extractor.js";
 import { briefingFor } from "./briefing.js";
+import { checkCustomConflicts } from "./checker.js";
 import { greeting, systemPrompt } from "./prompt.js";
 import { AGENT_TOOLS, drainPending, handleTool, releaseApproval, type ToolCtx } from "./tools.js";
 import type { Lead, RoomId } from "./types.js";
@@ -15,10 +17,19 @@ import type { Lead, RoomId } from "./types.js";
 const AAI_URL = "wss://agents.assemblyai.com/v1/ws";
 const REMINDER = "\n\nReminder: never accuse, never reveal sources or name other interviewees, never pressure.";
 
-const KEYTERMS = ["Tunde", "Daniel", "Corolla", "Admiralty Way", "Lekki", "warehouse", "Ajah", "Lekki Phase 1"];
+/** Names and places from the case, so speech-to-text spells them right. */
+const keyterms = () =>
+  [
+    ...CASE.interviewees.flatMap((p: any) => String(p.name).split(/\s+/)),
+    ...String(CASE.incident?.location ?? "").split(/[,;]/),
+    ...(CASE.custom ? [] : ["Corolla", "Admiralty Way", "Lekki", "warehouse", "Ajah"]),
+  ]
+    .map((t) => t.replace(/[^\p{L}\p{N} '-]/gu, "").trim())
+    .filter((t, i, a) => t.length > 1 && a.indexOf(t) === i)
+    .slice(0, 50);
 
-/** Recent upstream events per room, for diagnosing a live deployment (GET /api/debug/:room). */
-export const upstreamLog: Record<string, string[]> = { daniel: [], tunde: [] };
+/** Recent upstream events per workspace room, for diagnosing a live deployment. */
+export const upstreamLog: Record<string, string[]> = {};
 
 export class RoomBridge {
   private browser: WebSocket | null = null;
@@ -59,9 +70,22 @@ export class RoomBridge {
     if (text) this.extract(text);
   }
 
+  /** the workspace this bridge belongs to; every socket event and timer re-enters it */
+  private readonly ctx: Ctx;
+  private run<T>(fn: () => T): T {
+    return runIn(this.ctx, fn);
+  }
+  private get ulog() {
+    const k = `${this.ctx.id}/${this.room}`;
+    const log = (upstreamLog[k] ??= []);
+    if (log.length > 300) log.splice(0, log.length - 300);
+    return log;
+  }
+
   constructor(readonly room: RoomId) {
-    store.on("change", () => this.pushRoomState());
-    store.on("pending", () => this.deliverPending());
+    this.ctx = current();
+    store.on("change", () => this.run(() => this.pushRoomState()));
+    store.on("pending", () => this.run(() => this.deliverPending()));
   }
 
   /** Conflicts meant for this room reach the agent as redacted system context, never with names or quotes. */
@@ -110,12 +134,12 @@ export class RoomBridge {
   private pressObjectives() {
     if (this.ending || this.state.status !== "LIVE") return;
     const RELEVANT: Record<string, string[]> = { daniel: ["O1", "O2", "O3", "O4"], tunde: ["O1", "O2", "O4"] };
-    const open = store.objectives.filter((o) => !o.resolved && RELEVANT[this.room].includes(o.id));
+    const open = store.objectives.filter((o) => !o.resolved && (CASE.custom || RELEVANT[this.room].includes(o.id)));
     const key = open.map((o) => o.id).join(",");
     if (!open.length || key === this.lastObjectives) return;
     this.lastObjectives = key;
     if (this.lastContext !== "CHALLENGE") this.lastContext = "OBJECTIVE";
-    this.addContext(`Still to establish: ${open.map((o) => o.text).join("; ")}. Make your next question move one of these forward: exact times, the vehicle, who they were with, and why they were there.`);
+    this.addContext(`Still to establish: ${open.map((o) => o.text).join("; ")}. Make your next question move one of these forward: exact times, places, who they were with, and why.`);
   }
 
   /** New specifics become leads; places and businesses get checked on the web; the best one goes to the agent to pursue. */
@@ -134,7 +158,7 @@ export class RoomBridge {
       store.log(this.room, { kind: "lookup", label: `New thread · ${t.kind}`, detail: lead.text, refs: [lead.id], status: "done" });
       const researched = store.intel.filter((i) => i.room === this.room).length;
       if ((t.kind === "place" || t.kind === "business") && researched < 2) {
-        handleTool(this.room, "research", { query: `${t.text} Lagos`, purpose: t.why ?? `Verify "${t.text}" from: ${quote.slice(0, 80)}` }, this.toolCtx());
+        handleTool(this.room, "research", { query: `${t.text} ${CASE.custom ? String(CASE.incident?.location ?? "") : "Lagos"}`.trim(), purpose: t.why ?? `Verify "${t.text}" from: ${quote.slice(0, 80)}` }, this.toolCtx());
       }
     }
     const top = fresh[0];
@@ -152,7 +176,12 @@ export class RoomBridge {
     this.extracting = this.extracting.then(async () => {
       try {
         const { claims, threads } = await extractClaims(this.room, text, lastQ, previous);
-        for (const c of claims) handleTool(this.room, "record_claim", c, this.toolCtx());
+        const newIds: string[] = [];
+        for (const c of claims) {
+          const r: any = handleTool(this.room, "record_claim", c, this.toolCtx());
+          if (r?.claim_id) newIds.push(r.claim_id);
+        }
+        if (CASE.custom && newIds.length) await checkCustomConflicts(this.room, newIds);
         this.openThreads(threads, text);
         this.pressObjectives();
       } catch (e: any) {
@@ -169,25 +198,27 @@ export class RoomBridge {
   attachBrowser(ws: WebSocket) {
     this.browser?.close();
     this.browser = ws;
-    ws.on("message", (data, isBinary) => {
+    ws.on("message", (data, isBinary) => this.run(() => {
       if (isBinary) return this.forwardAudio(data as Buffer);
       let msg: any;
       try { msg = JSON.parse(String(data)); } catch { return; }
+      if (!msg || typeof msg !== "object") return;
       if (msg.type === "start") this.start();
       if (msg.type === "checkin") {
         store.plan[this.room].checkedIn = true;
         store.log(this.room, { kind: "system", label: "Checked in", detail: `${store.plan[this.room].location} · microphone ready`, status: "done" });
       }
       if (msg.type === "stop") this.finish("declined");
-    });
-    ws.on("close", () => {
+    }));
+    ws.on("error", () => {});
+    ws.on("close", () => this.run(() => {
       if (this.browser !== ws) return;
       this.browser = null;
       if (store.plan[this.room].checkedIn && this.state.status !== "LIVE") {
         store.plan[this.room].checkedIn = false;
         store.changed();
       }
-    });
+    }));
     this.pushRoomState();
   }
 
@@ -227,7 +258,8 @@ export class RoomBridge {
   start() {
     if (this.state.status === "LIVE" || this.state.status === "CONNECTING") return;
     if (!process.env.ASSEMBLYAI_API_KEY) {
-      store.log(this.room, { kind: "system", label: "ASSEMBLYAI_API_KEY missing on server", status: "error" });
+      store.log(this.room, { kind: "system", label: "Voice service is not configured on the server", status: "error" });
+      this.sendBrowser({ type: "error", message: "The interviewer is unavailable right now. Please try again later." });
       return;
     }
     this.ending = null;
@@ -260,7 +292,7 @@ export class RoomBridge {
     this.upstream = ws;
     let gotEnded = false;
 
-    ws.on("open", () => {
+    ws.on("open", () => this.run(() => {
       if (resume && this.sessionId) {
         ws.send(JSON.stringify({ type: "session.resume", session_id: this.sessionId }));
         return;
@@ -275,20 +307,25 @@ export class RoomBridge {
           system_prompt: this.prompt,
           greeting: greeting(this.room),
           ...(AGENT_TOOLS.length ? { tools: AGENT_TOOLS } : {}),
-          input: { format: { encoding: "audio/pcm" }, keyterms: KEYTERMS },
+          input: { format: { encoding: "audio/pcm" }, keyterms: keyterms() },
           output: { voice: process.env.VLLO_VOICE || "charles", format: { encoding: "audio/pcm" } },
         },
       }));
-    });
+    }));
 
-    ws.on("message", (raw) => {
+    ws.on("message", (raw) => this.run(() => {
       let ev: any;
       try { ev = JSON.parse(String(raw)); } catch { return; }
+      if (!ev || typeof ev !== "object") return;
       if (ev.type === "session.ended") gotEnded = true;
-      this.onUpstream(ev, ws);
-    });
+      try {
+        this.onUpstream(ev, ws);
+      } catch (e: any) {
+        console.error(`[${this.ctx.id}/${this.room}] upstream handler failed on ${ev.type}`, e);
+      }
+    }));
 
-    ws.on("close", () => {
+    ws.on("close", () => this.run(() => {
       if (this.upstream !== ws) return;
       this.ready = false;
       if (gotEnded || this.state.status === "ENDED") return;
@@ -303,9 +340,11 @@ export class RoomBridge {
         return this.connect(false);
       }
       store.setRoom(this.room, { status: "DISCONNECTED", agentState: "LISTENING" });
+      store.log(this.room, { kind: "system", label: "Voice service connection lost", detail: "Start the interview again from the investigation page.", status: "error" });
       this.sendBrowser({ type: "flush" });
-    });
-    ws.on("error", (e) => console.error(`[${this.room}] upstream error`, e.message));
+      this.sendBrowser({ type: "error", message: "The connection to the interviewer was lost. Please ask the investigator to restart the interview." });
+    }));
+    ws.on("error", (e) => console.error(`[${this.ctx.id}/${this.room}] upstream error`, e.message));
   }
 
   private sendUp(obj: unknown) {
@@ -337,13 +376,13 @@ export class RoomBridge {
   private flushContext() {
     if (!this.ready || this.lastEvent !== "reply.done" || this.pendingResults.length || !this.contextQueue.length) return;
     const content = this.contextQueue.splice(0).join("\n\n");
-    upstreamLog[this.room].push(`-> context (${content.length} chars)`);
+    this.ulog.push(`-> context (${content.length} chars)`);
     this.sendUp({ type: "conversation.message", role: "system", content });
   }
 
   private flushIfIdle(force = false) {
     if (!this.pendingResults.length) return;
-    if (force) upstreamLog[this.room].push(`forced flush of ${this.pendingResults.length} held result(s)`);
+    if (force) this.ulog.push(`forced flush of ${this.pendingResults.length} held result(s)`);
     if (!force && this.lastEvent !== "reply.done") {
       // Held because the interviewee started talking. If no reply follows, the agent is waiting on us: release.
       if (this.lastEvent !== "reply.started" && !this.holdTimer) {
@@ -357,7 +396,7 @@ export class RoomBridge {
     if (this.holdTimer) clearTimeout(this.holdTimer);
     this.holdTimer = null;
     for (const t of this.pendingResults) {
-      upstreamLog[this.room].push(`-> tool.result ${t.call_id}`);
+      this.ulog.push(`-> tool.result ${t.call_id}`);
       this.sendUp({ type: "tool.result", call_id: t.call_id, result: JSON.stringify(t.result) });
     }
     this.pendingResults = [];
@@ -366,10 +405,9 @@ export class RoomBridge {
   private onUpstream(ev: any, ws: WebSocket) {
     const room = this.room;
     if (ev.type !== "reply.audio" && ev.type !== "transcript.agent.delta" && ev.type !== "transcript.user.delta") {
-      const log = upstreamLog[room];
+      const log = this.ulog;
       const t = this.state.startedAt ? ((Date.now() - this.state.startedAt) / 1000).toFixed(1) : "-";
       log.push(`${t} ${ev.type}${ev.status ? ` ${ev.status}` : ""}${ev.name ? ` ${ev.name}` : ""}${ev.code ? ` ${ev.code}: ${ev.message}` : ""} last=${this.lastEvent} pending=${this.pendingResults.length}`);
-      if (log.length > 300) log.splice(0, log.length - 300);
     }
     switch (ev.type) {
       case "session.ready":
@@ -481,7 +519,7 @@ export class RoomBridge {
         const raw = String(ev.text ?? "").trim();
         if (raw) this.replyHadContent = true;
         const text = clean(raw);
-        if (raw && text !== raw) upstreamLog[room].push(`sanitised agent text: ${raw.slice(0, 120)}`);
+        if (raw && text !== raw) this.ulog.push(`sanitised agent text: ${raw.slice(0, 120)}`);
         if (!text) break;
         this.noteQuestion(text, !!ev.interrupted);
         store.setRoom(room, { caption: text });
@@ -501,7 +539,7 @@ export class RoomBridge {
       }
 
       case "reply.done":
-        upstreamLog[room].push(`   (reply had ${this.replyAudio} audio chunks, ${this.replyWords} words, content=${this.replyHadContent})`);
+        this.ulog.push(`   (reply had ${this.replyAudio} audio chunks, ${this.replyWords} words, content=${this.replyHadContent})`);
         this.lastEvent = ev.type;
         if (ev.status === "interrupted") {
           this.pendingResults = [];
@@ -517,7 +555,7 @@ export class RoomBridge {
             this.nudges++;
             const nudge = setTimeout(() => {
               if (this.lastEvent !== "reply.done" || this.ending) return;
-              upstreamLog[room].push("-> reply.create (empty reply nudge)");
+              this.ulog.push("-> reply.create (empty reply nudge)");
               this.sendUp({ type: "reply.create", instructions: "Continue the interview now with your next short, open question." });
             }, 1200);
             void nudge;

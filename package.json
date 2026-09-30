@@ -14,9 +14,11 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@types/pdfkit": "^0.17.6",
     "@types/qrcode": "^1.5.6",
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
+    "pdfkit": "^0.20.2",
     "qrcode": "^1.5.4",
     "tsx": "^4.23.15",
     "ws": "^8.22.0"

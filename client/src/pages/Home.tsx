@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Add01Icon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Face } from "@/components/Face";
 import { Pill, status } from "@/components/Status";
 import { useTick } from "@/components/Sequence";
 import { useConsole, type RoomId } from "@/lib/useConsole";
+import { activeWorkspace, investigationPath, previousWorkspace, startFreshWorkspace } from "@/lib/workspace";
 
 const STEPS: [string, string][] = [
   ["Add the suspect", "Name, photo, what’s already on file. You get an interview link to send them."],
@@ -16,11 +17,22 @@ const STEPS: [string, string][] = [
 ];
 
 export default function Home() {
-  const { state: s, send } = useConsole();
+  const [ws, setWs] = useState(activeWorkspace);
+  const { state: s, send } = useConsole(ws);
   const [confirm, setConfirm] = useState(false);
+  const [prev, setPrev] = useState(previousWorkspace);
   useTick(1000);
   const ids = s ? (["daniel", "tunde"] as RoomId[]).filter((r) => s.registered[r]) : [];
-  const full = ids.length === 2;
+
+  // Everyone in this workspace has finished: coming back starts a clean one (the old report stays linked).
+  useEffect(() => {
+    if (!s || !ids.length) return;
+    const finished = ids.every((r) => s.rooms[r].status === "ENDED" || s.rooms[r].status === "DISCONNECTED");
+    if (finished) {
+      setWs(startFreshWorkspace());
+      setPrev(previousWorkspace());
+    }
+  }, [s, ids.length]);
 
   return (
     <div className="min-h-full bg-white">
@@ -57,6 +69,15 @@ export default function Home() {
           </a>
         )}
 
+        {prev && prev !== ws && ids.length === 0 && (
+          <p className="mt-6 text-[14px] text-stone-600">
+            Your last investigation:{" "}
+            <a className="font-medium text-stone-900 underline underline-offset-4" href={`/i/${prev}`}>
+              open its report
+            </a>
+          </p>
+        )}
+
         {!s ? (
           <p className="mt-12 text-sm text-muted-foreground">
             <span className="shimmer-text">Waking up the server, this can take up to a minute</span>
@@ -72,7 +93,7 @@ export default function Home() {
               const st = status(s, id);
               return (
                 <li key={id}>
-                  <a href={`/i/${id}`} className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-stone-50">
+                  <a href={investigationPath(ws, id)} className="group flex items-center gap-4 px-5 py-4 transition-colors hover:bg-stone-50">
                     <Face id={id} name={p.name} square className="size-12" />
                     <div className="min-w-0 flex-1">
                       <div className="text-[15px] font-medium">{p.name}</div>
@@ -109,7 +130,7 @@ export default function Home() {
             {confirm ? (
               <span className="flex items-center gap-3">
                 Clear every investigation?
-                <button className="cursor-pointer font-medium text-red-600" onClick={() => { send({ type: "reset", full: true }); setConfirm(false); }}>
+                <button className="cursor-pointer font-medium text-red-600" onClick={() => { send({ type: "reset", full: true }); setWs(startFreshWorkspace()); setConfirm(false); }}>
                   Clear
                 </button>
                 <button className="cursor-pointer" onClick={() => setConfirm(false)}>

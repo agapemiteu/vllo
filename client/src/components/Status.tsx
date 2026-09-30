@@ -18,6 +18,7 @@ export function status(s: Snapshot, id: RoomId) {
     return { key: "live", label: "Live", tone: "green", timer: `${clock(end - t)} left`, progress: 1 - (end - t) / (plan.durationSec * 1000) };
   }
   if (room.status === "ENDED") return { key: "done", label: "Completed", tone: "stone", timer: "" };
+  if (room.status === "DISCONNECTED") return { key: "interrupted", label: "Interrupted", tone: "amber", timer: "Connection to the interviewer was lost" };
   if (plan.scheduledAt) {
     const left = plan.scheduledAt - t;
     if (left > 0) return { key: "scheduled", label: "Scheduled", tone: "amber", timer: `Starts in ${clock(left)}` };

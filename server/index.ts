@@ -1,20 +1,36 @@
 import "dotenv/config";
-import express from "express";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import express, { type NextFunction, type Request, type Response } from "express";
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
-import { RoomBridge, setOnRoomEnded, upstreamLog } from "./bridge.js";
-import { CASE, restoreDefaultPeople, store } from "./caseStore.js";
+import { setOnRoomEnded, upstreamLog } from "./bridge.js";
+import { CASE, restoreDefaultPeople, sampleCase, store } from "./caseStore.js";
+import { runIn } from "./context.js";
 import { buildReport } from "./report.js";
 import { evaluate } from "./conflicts.js";
-import { decide, releaseApproval } from "./tools.js";
+import { customCase } from "./casefile.js";
+import { reportPdf } from "./reportPdf.js";
+import { sendReportEmail } from "./email.js";
+import { afterSlot, startReason } from "./schedule.js";
 import { agentFor, agentLlm } from "./agents.js";
+import { allWorkspaces, getWorkspace, SLOT, type Workspace } from "./workspace.js";
 import { ROOMS, type RoomId } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
 const app = express();
 const dist = fileURLToPath(new URL("../dist", import.meta.url));
+
+// Never let one bad request or socket take the whole server down.
+process.on("unhandledRejection", (e) => console.error("unhandled rejection", e));
+process.on("uncaughtException", (e) => console.error("uncaught exception", e));
+
+const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+const num = (v: unknown, min: number, max: number, dflt: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : dflt;
+};
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,24}$/;
 
 // The client may be hosted on another origin (Vercel); allow it to call the API.
 app.use("/api", (req, res, next) => {
@@ -27,230 +43,308 @@ app.use("/api", (req, res, next) => {
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
-/**
- * Register a person of interest into one of the case's two roles, with when and how long to interview them.
- * start: "manual" | "in" (inSec) | "after" (afterRoom ends, plus gapSec)
- */
-app.post("/api/register/:id", express.json(), (req, res) => {
-  const id = req.params.id as RoomId;
-  if (!ROOMS.includes(id)) return void res.status(400).json({ error: "unknown role" });
+/** Resolve the workspace in the URL and run the rest of the request inside it. */
+type WReq = Request & { ws: Workspace; room?: RoomId };
+const ctxOf = (req: unknown): WReq => req as WReq;
+const inWorkspace = (req: Request, res: Response, next: NextFunction) => {
+  const w = getWorkspace(String(req.params.ws), created);
+  if (!w) return void res.status(400).json({ error: "invalid or unavailable workspace" });
+  ctxOf(req).ws = w;
+  runIn(w, next);
+};
+const w = express.Router({ mergeParams: true });
+// The person slot (p1/p2) in any workspace route.
+w.param("slot", (req, res, next, value) => {
+  const room = SLOT[String(value)];
+  if (!room) return void res.status(400).json({ error: "unknown person slot" });
+  ctxOf(req).room = room;
+  next();
+});
+app.use("/api/w/:ws", inWorkspace, w);
+
+/** Set up the case: the built-in sample, or the investigator's own. Not while an interview is running. */
+w.post("/case", express.json({ limit: "64kb" }), (req, res) => {
+  const ws = (ctxOf(req)).ws;
+  if (ROOMS.some((r) => ["LIVE", "CONNECTING"].includes(store.rooms[r].status)))
+    return void res.status(409).json({ error: "An interview is in progress. End it before changing the case." });
   const b = req.body ?? {};
-  // A finished interview's slot is reused: clear that person's old session first.
-  if (store.rooms[id].status === "ENDED" || store.rooms[id].status === "DISCONNECTED") {
-    bridges[id].hardReset();
-    store.resetRoom(id);
-    evaluate(store, id);
+  let file: any;
+  if (b.mode === "custom") {
+    const made = customCase(b);
+    if ("error" in made) return void res.status(400).json(made);
+    file = made.file;
+  } else file = sampleCase();
+  for (const r of ROOMS) ws.bridges[r].hardReset();
+  store.caseFile = file;
+  store.reset();
+  for (const r of ROOMS) {
+    store.registered[r] = false;
+    Object.assign(store.plan[r], { scheduledAt: undefined, after: undefined, armed: false, checkedIn: false });
+    ws.photos.delete(r);
+    store.photos[r] = 0;
   }
-  const p = CASE.interviewees.find((x: any) => x.id === id);
-  if (typeof b.name === "string" && b.name.trim()) p.name = b.name.trim().slice(0, 60);
-  if (typeof b.relation === "string" && b.relation.trim()) p.relation = b.relation.trim().slice(0, 120);
-  if (typeof b.notes === "string") p.on_file = b.notes.trim().slice(0, 400);
-  const plan = store.plan[id];
-  plan.durationSec = Math.min(180, Math.max(45, Number(b.durationSec) || 60));
-  plan.email = typeof b.email === "string" && /^[^\s@]+@[^\s@]+$/.test(b.email.trim()) ? b.email.trim().slice(0, 120) : undefined;
+  store.changed();
+  res.json({ ok: true, custom: !!file.custom });
+});
+
+/**
+ * Register a person into slot p1/p2 with when and how long to interview them.
+ * start: "join" (on check-in) | "in" (inSec) | "after" (afterSlot ends, plus gapSec)
+ */
+w.post("/register/:slot", express.json({ limit: "32kb" }), (req, res) => {
+  const { ws, room: id } = ctxOf(req);
+  const room = id!;
+  const b = req.body ?? {};
+  const name = str(b.name, 60);
+  if (!name) return void res.status(400).json({ error: "A name is required." });
+  if (["LIVE", "CONNECTING"].includes(store.rooms[room].status))
+    return void res.status(409).json({ error: "This person's interview is in progress." });
+  // A finished (or failed) interview's slot is reused: clear that person's old session first.
+  if (store.rooms[room].status !== "IDLE" || store.claims.some((c) => c.room === room)) {
+    ws.bridges[room].hardReset();
+    store.resetRoom(room);
+    evaluate(store, room);
+  }
+  const p = CASE.interviewees.find((x: any) => x.id === room);
+  p.name = name;
+  p.relation = str(b.relation, 120) || (CASE.custom ? "Person of interest" : p.relation);
+  p.on_file = str(b.notes, 600);
+  const plan = store.plan[room];
+  plan.durationSec = num(b.durationSec, 45, 300, 90);
+  plan.email = EMAIL.test(str(b.email, 200)) ? str(b.email, 200) : undefined;
   plan.after = undefined;
   plan.scheduledAt = undefined;
-  plan.armed = b.start === "join" || b.start === "manual";
-  if (b.start === "in") plan.scheduledAt = Date.now() + Math.min(3600, Math.max(5, Number(b.inSec) || 60)) * 1000;
-  if (b.start === "after" && ROOMS.includes(b.afterRoom) && b.afterRoom !== id) {
-    plan.after = { room: b.afterRoom, gapSec: Math.min(600, Math.max(5, Number(b.gapSec) || 60)) };
-    if (store.rooms[b.afterRoom as RoomId].status === "ENDED") plan.scheduledAt = Date.now() + plan.after.gapSec * 1000;
-  }
-  store.registered[id] = true;
+  plan.armed = false;
+  const other = SLOT[str(b.afterSlot, 10)];
+  if (b.start === "in") plan.scheduledAt = Date.now() + num(b.inSec, 5, 24 * 3600, 60) * 1000;
+  else if (b.start === "after" && other && other !== room && store.registered[other]) {
+    plan.after = { room: other, gapSec: num(b.gapSec, 5, 600, 60) };
+    if (store.rooms[other].status === "ENDED") plan.scheduledAt = Date.now() + plan.after.gapSec * 1000;
+  } else plan.armed = true;
+  store.registered[room] = true;
   store.changed();
-  res.json({ ok: true, id });
+  res.json({ ok: true });
 });
 
-app.post("/api/unregister/:id", (req, res) => {
-  const id = req.params.id as RoomId;
-  if (!ROOMS.includes(id)) return void res.status(400).end();
-  store.registered[id] = false;
-  store.plan[id].scheduledAt = undefined;
-  store.plan[id].after = undefined;
+// Photos, shared by every page and device in the workspace (and put in the report).
+w.post("/photo/:slot", express.json({ limit: "3mb" }), (req, res) => {
+  const { ws, room } = ctxOf(req);
+  const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body?.dataUrl ?? ""));
+  if (!m) return void res.status(400).json({ error: "Expected a JPEG, PNG or WebP image." });
+  const buf = Buffer.from(m[2], "base64");
+  if (buf.length < 100 || buf.length > 2_000_000) return void res.status(400).json({ error: "Image is empty or too large." });
+  ws.photos.set(room!, buf);
+  store.photos[room!] = Date.now();
+  store.changed();
+  res.json({ ok: true, version: store.photos[room!] });
+});
+w.delete("/photo/:slot", (req, res) => {
+  const { ws, room } = ctxOf(req);
+  ws.photos.delete(room!);
+  store.photos[room!] = 0;
   store.changed();
   res.json({ ok: true });
 });
-app.get("/api/debug/:room", (req, res) => res.type("text").send((upstreamLog[req.params.room] ?? []).join("\n")));
-
-// Person-of-interest photos, shared by every device (console, plan, room). Kept in memory for the demo.
-const photoData = new Map<RoomId, Buffer>();
-app.post("/api/photo/:id", express.json({ limit: "3mb" }), (req, res) => {
-  const id = req.params.id as RoomId;
-  const m = /^data:image\/(jpeg|png|webp);base64,(.+)$/.exec(String(req.body?.dataUrl ?? ""));
-  if (!ROOMS.includes(id) || !m) return void res.status(400).json({ error: "expected a data URL image for daniel or tunde" });
-  photoData.set(id, Buffer.from(m[2], "base64"));
-  store.photos[id] = Date.now();
-  store.changed();
-  res.json({ ok: true });
-});
-app.delete("/api/photo/:id", (req, res) => {
-  const id = req.params.id as RoomId;
-  photoData.delete(id);
-  if (ROOMS.includes(id)) store.photos[id] = 0;
-  store.changed();
-  res.json({ ok: true });
-});
-app.get("/api/photo/:id", (req, res) => {
-  const buf = photoData.get(req.params.id as RoomId);
+w.get("/photo/:slot", (req, res) => {
+  const { ws, room } = ctxOf(req);
+  const buf = ws.photos.get(room!);
   if (!buf) return void res.status(404).end();
-  res.set("Cache-Control", "no-cache").type("jpeg").send(buf);
+  res.set("Cache-Control", "no-cache").type(buf[0] === 0x89 ? "png" : "jpeg").send(buf);
 });
+
+/** The interview report as a PDF file. */
+w.get("/report/:slot.pdf", async (req, res, next) => {
+  try {
+    const { ws, room } = ctxOf(req);
+    const pdf = await reportPdf(ws, room!);
+    const who = String(CASE.interviewees.find((p: any) => p.id === room)?.name ?? "interview").replace(/[^A-Za-z0-9]+/g, "-");
+    res.set("Content-Disposition", `${req.query.inline ? "inline" : "attachment"}; filename="vllo-report-${who}.pdf"`);
+    res.type("pdf").send(pdf);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** Email the PDF report. Falls back cleanly when no mail provider is configured. */
+w.post("/email/:slot", express.json({ limit: "8kb" }), async (req, res, next) => {
+  try {
+    const { ws, room } = ctxOf(req);
+    const to = str(req.body?.to, 200);
+    if (!EMAIL.test(to)) return void res.status(400).json({ error: "That email address doesn't look right." });
+    const now = Date.now();
+    ws.emails = ws.emails.filter((t) => now - t < 10 * 60 * 1000);
+    if (ws.emails.length >= 5) return void res.status(429).json({ error: "Too many emails in a short time. Try again in a few minutes." });
+    const pdf = await reportPdf(ws, room!);
+    const result = await sendReportEmail(to, room!, pdf);
+    if (result.ok) ws.emails.push(now);
+    res.status(result.ok ? 200 : result.status).json(result);
+  } catch (e) {
+    next(e);
+  }
+});
+
+w.get("/debug/:slot", (req, res) => {
+  const { ws, room } = ctxOf(req);
+  res.type("text").send((upstreamLog[`${ws.id}/${room}`] ?? []).join("\n"));
+});
+
 if (existsSync(dist)) {
   app.use(express.static(dist));
-  app.get(/^\/(?!ws).*/, (_req, res) => res.sendFile(`${dist}/index.html`));
+  app.get(/^\/(?!ws|api).*/, (_req, res) => res.sendFile(`${dist}/index.html`));
 }
 
-/** Persist the full session (state + report) so it can be reopened or audited later. */
-function saveSession() {
-  const dir = fileURLToPath(new URL("../sessions", import.meta.url));
-  mkdirSync(dir, { recursive: true });
-  const file = `${dir}/case024-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-  writeFileSync(file, JSON.stringify({ ...store.snapshot(), report: store.report }, null, 2));
-  console.log(`session saved: ${file}`);
-}
+app.use("/api", (_req, res) => res.status(404).json({ error: "not found" }));
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+  const status = Number(err?.status ?? err?.statusCode);
+  if (status >= 400 && status < 500) {
+    if (!res.headersSent) res.status(status).json({ error: status === 413 ? "That upload is too large." : "The request couldn't be read." });
+    return;
+  }
+  console.error("request failed", err);
+  if (!res.headersSent) res.status(500).json({ error: "Something went wrong. Please try again." });
+});
 
 const server = createServer(app);
-const wss = new WebSocketServer({ noServer: true });
-const bridges = Object.fromEntries(ROOMS.map((r) => [r, new RoomBridge(r)])) as Record<RoomId, RoomBridge>;
-const consoles = new Set<WebSocket>();
+const wss = new WebSocketServer({ noServer: true, maxPayload: 512 * 1024 });
 
-const broadcast = () => {
-  const msg = JSON.stringify({ type: "snapshot", state: store.snapshot() });
-  for (const c of consoles) if (c.readyState === c.OPEN) c.send(msg);
+const broadcast = (ws: Workspace) => {
+  if (!ws.consoles.size) return;
+  const msg = JSON.stringify({ type: "snapshot", state: ws.store.snapshot() });
+  for (const c of ws.consoles) if (c.readyState === c.OPEN) c.send(msg);
 };
-store.on("change", broadcast);
+function created(ws: Workspace) {
+  ws.store.on("change", () => runIn(ws, () => broadcast(ws)));
+}
 
 setOnRoomEnded(() => {
   // "After X ends": schedule whoever is waiting on the room that just finished.
   for (const r of ROOMS) {
     const a = store.plan[r].after;
-    if (a && store.rooms[a.room].status === "ENDED" && !store.plan[r].scheduledAt && store.rooms[r].status === "IDLE") {
-      store.plan[r].scheduledAt = Date.now() + a.gapSec * 1000;
-      store.changed();
-    }
-  }
-  // Sequence: first interview ended (early or on time) -> the next starts after the handoff gap.
-  const seq = store.sequence;
-  if (seq) {
-    const next = seq.order.find((r) => store.rooms[r].status === "IDLE");
-    const soon = Date.now() + seq.gapSec * 1000;
-    if (next && (store.plan[next].scheduledAt ?? Infinity) > soon) {
-      store.plan[next].scheduledAt = soon;
-      store.changed();
-    }
+    const at = afterSlot(store.plan[r], !!a && store.rooms[a.room].status === "ENDED", store.rooms[r], Date.now());
+    if (at) store.plan[r].scheduledAt = at;
   }
   // Report as soon as any interview ends; it covers everyone interviewed so far.
-  {
-    store.report = buildReport();
-    store.changed();
-    saveSession();
-  }
+  store.report = buildReport();
+  store.changed();
 });
+
+function onConsoleMessage(ws: Workspace, raw: string) {
+  let msg: any;
+  try { msg = JSON.parse(raw); } catch { return; }
+  if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
+  const room = SLOT[String(msg.room)];
+  switch (msg.type) {
+    case "report":
+      store.report = buildReport();
+      store.changed();
+      break;
+    case "close_report":
+      store.report = null;
+      store.changed();
+      break;
+    case "start_room":
+      if (!room) return;
+      // An interview cut off by a lost connection can be restarted; what was said so far is kept.
+      if (store.rooms[room].status === "DISCONNECTED") {
+        ws.bridges[room].hardReset();
+        store.setRoom(room, { status: "IDLE", agentState: "LISTENING", caption: "", userPartial: "" });
+        store.plan[room].checkedIn = false;
+      }
+      if (store.rooms[room].status !== "IDLE") return;
+      // Not checked in yet: arm it, so it starts the moment they join.
+      if (store.plan[room].checkedIn) ws.bridges[room].kickoff("investigator");
+      else {
+        store.plan[room].armed = true;
+        store.plan[room].scheduledAt = undefined;
+        store.plan[room].after = undefined;
+        store.log(room, { kind: "system", label: `Starts as soon as ${String(CASE.interviewees.find((p: any) => p.id === room)?.name ?? "they").split(" ")[0]} checks in`, status: "done" });
+      }
+      break;
+    case "end_room":
+      if (room) ws.bridges[room].finish("investigator");
+      break;
+    case "mode":
+      if (room && (msg.mode === "auto" || msg.mode === "assisted")) store.setRoom(room, { mode: msg.mode });
+      break;
+    case "direct":
+      if (room && typeof msg.text === "string" && msg.text.trim()) ws.bridges[room].direct(msg.text.trim().slice(0, 400));
+      break;
+    case "reset":
+      for (const r of ROOMS) ws.bridges[r].hardReset();
+      store.reset();
+      if (msg.full) {
+        store.caseFile = sampleCase();
+        store.reset();
+        restoreDefaultPeople();
+        for (const r of ROOMS) {
+          store.registered[r] = false;
+          Object.assign(store.plan[r], { scheduledAt: undefined, after: undefined, armed: false, checkedIn: false });
+          ws.photos.delete(r);
+          store.photos[r] = 0;
+        }
+      }
+      for (const r of ROOMS) if ((store.plan[r].scheduledAt ?? Infinity) <= Date.now()) store.plan[r].scheduledAt = undefined;
+      store.changed();
+      break;
+  }
+}
 
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "/", "http://x");
-  const m = /^\/ws\/room\/(daniel|tunde)$/.exec(url.pathname);
-  if (m) {
-    return wss.handleUpgrade(req, socket, head, (ws) => bridges[m[1] as RoomId].attachBrowser(ws));
+  // /ws/w/<workspace>/room/<slot> and /ws/w/<workspace>/console; the old single-workspace paths map to "demo".
+  let m = /^\/ws\/w\/([a-z0-9]+)\/(room|console)(?:\/([a-z0-9]+))?$/.exec(url.pathname);
+  if (!m) {
+    const legacy = /^\/ws\/(room|console)(?:\/(daniel|tunde))?$/.exec(url.pathname);
+    if (legacy) m = [url.pathname, "demoworkspace", legacy[1], legacy[2]] as unknown as RegExpExecArray;
   }
-  if (url.pathname === "/ws/console") {
-    return wss.handleUpgrade(req, socket, head, (ws) => {
-      consoles.add(ws);
-      ws.send(JSON.stringify({ type: "snapshot", state: store.snapshot() }));
-      ws.on("close", () => consoles.delete(ws));
-      ws.on("message", (data) => {
-        let msg: any;
-        try { msg = JSON.parse(String(data)); } catch { return; }
-        if (msg.type === "report") {
-          store.report = buildReport();
-          store.changed();
-          saveSession();
-        }
-        if (msg.type === "close_report") {
-          store.report = null;
-          store.changed();
-        }
-        const room = msg.room as RoomId;
-        if (msg.type === "mode" && bridges[room] && (msg.mode === "auto" || msg.mode === "assisted")) {
-          store.setRoom(room, { mode: msg.mode });
-          store.log(room, { kind: "system", label: msg.mode === "assisted" ? "Assisted mode: investigator approves each question" : "Autonomous mode", status: "done" });
-          if (msg.mode === "auto") releaseApproval(room);
-        }
-        if (msg.type === "decide" && bridges[room]) decide(room, { decision: msg.decision, question: msg.question, note: msg.note });
-        if (msg.type === "direct" && bridges[room] && typeof msg.text === "string" && msg.text.trim()) bridges[room].direct(msg.text.trim());
-        if (msg.type === "schedule" && bridges[room]) {
-          // Relative slots ("in 5 minutes") are computed on the server clock, so device clock skew can't delay a kickoff.
-          const at = msg.in != null ? Date.now() + Number(msg.in) : msg.at == null ? undefined : Number(msg.at);
-          store.plan[room] = { ...store.plan[room], scheduledAt: Number.isFinite(at) ? at : undefined, location: String(msg.location ?? store.plan[room].location).slice(0, 80) };
-          if (msg.mode === "auto" || msg.mode === "assisted") store.setRoom(room, { mode: msg.mode });
-          store.changed();
-        }
-        if (msg.type === "start_room" && bridges[room]) {
-          // Not checked in yet: arm it, so it starts the moment they join.
-          if (store.plan[room].checkedIn) bridges[room].kickoff("investigator");
-          else {
-            store.plan[room].armed = true;
-            store.log(room, { kind: "system", label: `Starts as soon as ${store.snapshot().case.interviewees.find((p: any) => p.id === room).name.split(" ")[0]} checks in`, status: "done" });
+  const ws = m ? getWorkspace(m[1], created) : null;
+  const room = m?.[3] ? SLOT[m[3]] : undefined;
+  if (!m || !ws || (m[2] === "room" && !room)) return void socket.destroy();
+
+  wss.handleUpgrade(req, socket, head, (sock) =>
+    runIn(ws, () => {
+      sock.on("error", () => {});
+      if (m![2] === "room") return ws.bridges[room!].attachBrowser(sock);
+      ws.consoles.add(sock);
+      sock.send(JSON.stringify({ type: "snapshot", state: ws.store.snapshot() }));
+      sock.on("close", () => ws.consoles.delete(sock));
+      sock.on("message", (data) =>
+        runIn(ws, () => {
+          ws.lastActive = Date.now();
+          try {
+            onConsoleMessage(ws, String(data));
+          } catch (e) {
+            console.error(`[${ws.id}] console message failed`, e);
           }
-        }
-        if (msg.type === "run_sequence") {
-          // One interview at a time: countdown, interview, handoff gap, next interview.
-          const order: RoomId[] = msg.first === "daniel" ? ["daniel", "tunde"] : ["tunde", "daniel"];
-          const duration = Math.min(600, Math.max(45, Number(msg.durationSec) || 120));
-          const gap = Math.min(120, Math.max(5, Number(msg.gapSec) || 20));
-          const first = Date.now() + Math.min(600, Math.max(5, Number(msg.startInSec) || 15)) * 1000;
-          store.plan[order[0]] = { ...store.plan[order[0]], durationSec: duration, scheduledAt: first };
-          store.plan[order[1]] = { ...store.plan[order[1]], durationSec: duration, scheduledAt: first + (duration + gap) * 1000 };
-          store.sequence = { order, gapSec: gap };
-          store.changed();
-        }
-        if (msg.type === "cancel_sequence") {
-          store.sequence = null;
-          for (const r of ROOMS) if (store.rooms[r].status === "IDLE") store.plan[r].scheduledAt = undefined;
-          store.changed();
-        }
-        if (msg.type === "end_room" && bridges[msg.room as RoomId]) bridges[msg.room as RoomId].finish("investigator");
-        if (msg.type === "reset") {
-          for (const b of Object.values(bridges)) b.hardReset();
-          store.reset();
-          if (msg.full) {
-            restoreDefaultPeople();
-            for (const r of ROOMS) {
-              store.registered[r] = false;
-              store.plan[r].scheduledAt = undefined;
-              store.plan[r].after = undefined;
-              photoData.delete(r);
-              store.photos[r] = 0;
-            }
-          }
-          // A slot that already passed would fire again immediately after a reset.
-          for (const r of ROOMS) if ((store.plan[r].scheduledAt ?? Infinity) <= Date.now()) store.plan[r].scheduledAt = undefined;
-          store.sequence = null;
-        }
-      });
-    });
-  }
-  socket.destroy();
+        }),
+      );
+    }),
+  );
 });
 
-// Scheduler: a checked-in room whose slot has arrived kicks off on its own.
+// Scheduler: every workspace, every second.
 setInterval(() => {
-  for (const r of ROOMS) {
-    const p = store.plan[r];
-    if (store.rooms[r].status !== "IDLE" || !p.checkedIn) continue;
-    // No slot and not queued behind someone: start on check-in, so the link works on its own (even after a server restart).
-    const onCheckIn = p.armed || (!p.scheduledAt && !p.after);
-    if (onCheckIn || (p.scheduledAt && Date.now() >= p.scheduledAt)) {
-      p.armed = false;
-      bridges[r].kickoff(p.scheduledAt ? "schedule" : "checkin");
-    }
+  for (const ws of allWorkspaces()) {
+    runIn(ws, () => {
+      for (const r of ROOMS) {
+        const why = startReason(store.plan[r], store.rooms[r], Date.now());
+        if (!why) continue;
+        store.plan[r].armed = false;
+        try {
+          ws.bridges[r].kickoff(why);
+        } catch (e) {
+          console.error(`[${ws.id}/${r}] kickoff failed`, e);
+        }
+      }
+    });
   }
 }, 1000);
 
 server.listen(PORT, () => {
   console.log(`vllo server on :${PORT}`);
   if (!process.env.ASSEMBLYAI_API_KEY) console.warn("ASSEMBLYAI_API_KEY is not set");
-  if (!process.env.GROQ_API_KEY) console.warn("GROQ_API_KEY is not set: managed LLM, no web research");
+  if (!process.env.GROQ_API_KEY) console.warn("GROQ_API_KEY is not set: no claim extraction or web checks");
+  if (!process.env.BREVO_API_KEY || !process.env.REPORT_FROM_EMAIL) console.warn("BREVO_API_KEY or REPORT_FROM_EMAIL not set: report email falls back to download");
   if (agentLlm() && process.env.ASSEMBLYAI_API_KEY) {
     for (const r of ROOMS)
       agentFor(r).then(
@@ -258,5 +352,4 @@ server.listen(PORT, () => {
         (e) => console.error(`stored agent vllo-${r} failed: ${e.message}`),
       );
   }
-  if (process.env.VLLO_SEED === "1") import("../scripts/seed.js").then((m) => m.seed());
 });

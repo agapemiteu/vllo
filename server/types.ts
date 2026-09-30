@@ -2,7 +2,7 @@ export type RoomId = "daniel" | "tunde";
 export const ROOMS: RoomId[] = ["daniel", "tunde"];
 export const other = (r: RoomId): RoomId => (r === "daniel" ? "tunde" : "daniel");
 
-export type Subject = "location" | "vehicle" | "companion" | "car_handover" | "other";
+export type Subject = "location" | "vehicle" | "companion" | "car_handover" | "activity" | "other";
 
 export interface Claim {
   id: string;
@@ -24,7 +24,7 @@ export type ConflictType = "EXTERNAL_CONFLICT" | "INTERNAL_CONFLICT" | "CROSS_AC
 export interface Conflict {
   id: string;
   key: string;
-  rule: "R1" | "R2" | "R3" | "R4" | "R5";
+  rule: "R1" | "R2" | "R3" | "R4" | "R5" | "AI";
   type: ConflictType;
   topic: string;
   claimIds: string[];

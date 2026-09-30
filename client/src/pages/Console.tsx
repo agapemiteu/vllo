@@ -18,6 +18,7 @@ import { SequenceBar } from "@/components/Sequence";
 import { Compare, Facts, Targets } from "@/components/Session";
 import { avatar, cn, mmss, pretty } from "@/lib/utils";
 import { useConsole, type RoomId, type Snapshot } from "@/lib/useConsole";
+import { activeWorkspace } from "@/lib/workspace";
 
 const TABS = [
   ["conflicts", "Conflicts"],
@@ -36,7 +37,7 @@ function exportSession(s: Snapshot) {
 }
 
 export default function Console() {
-  const { state: s, connected, send } = useConsole();
+  const { state: s, connected, send } = useConsole(activeWorkspace());
   const [highlight, setHighlight] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [tab, setTab] = useState<(typeof TABS)[number][0]>("conflicts");

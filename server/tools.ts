@@ -1,4 +1,5 @@
-import { store } from "./caseStore.js";
+import { CASE, store } from "./caseStore.js";
+import { current } from "./context.js";
 import { evaluate, toMin } from "./conflicts.js";
 import { checkQuestion, redact } from "./guardrails.js";
 import { webResearch } from "./research.js";
@@ -95,16 +96,17 @@ export const TOOLS = [
 ];
 
 type Decision = { decision: "approve" | "reject"; question?: string; note?: string };
-const approvals = new Map<RoomId, (d: Decision) => void>();
+const approvals = new Map<string, (d: Decision) => void>();
+const akey = (room: RoomId) => `${current().id}/${room}`;
 
 /** Investigator decision on a question drafted in assisted mode. */
 export function decide(room: RoomId, d: Decision) {
-  approvals.get(room)?.(d);
+  approvals.get(akey(room))?.(d);
 }
 
 /** Room switched back to autonomous, ended or reset: let a held question through so the agent is never stuck. */
 export function releaseApproval(room: RoomId) {
-  approvals.get(room)?.({ decision: "approve" });
+  approvals.get(akey(room))?.({ decision: "approve" });
 }
 
 /** Tools the voice agent sees. Claims are extracted server-side from every utterance instead. */
@@ -165,7 +167,7 @@ function normValue(subject: Subject, v: string) {
   return alias;
 }
 
-function normTime(t?: string) {
+function normTime(t?: string, evening = true) {
   if (!t) return undefined;
   const s = String(t).trim().toLowerCase();
   const m = /^(\d{1,2})(?:[:.]?(\d{2}))?\s*(am|pm)?$/.exec(s);
@@ -174,7 +176,7 @@ function normTime(t?: string) {
   const min = Number(m[2] ?? 0);
   if (m[3] === "pm" && h < 12) h += 12;
   // Case window is the evening: a bare "9:05" or "8" means 21:05 / 20:00.
-  if (!m[3] && h >= 1 && h <= 11) h += 12;
+  if (evening && !m[3] && h >= 1 && h <= 11) h += 12;
   if (m[3] === "am" && h === 12) h = 0;
   if (h > 23 || min > 59) return undefined;
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
@@ -204,14 +206,18 @@ function openItems(room: RoomId) {
 }
 
 const SUBJECT_LABEL: Record<string, string> = {
-  location: "Location", vehicle: "Vehicle", companion: "Companion", car_handover: "Car handover", other: "Detail",
+  location: "Location", vehicle: "Vehicle", companion: "Companion", car_handover: "Car handover", activity: "Activity", other: "Detail",
 };
 
 export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx): unknown {
   switch (name) {
     case "record_claim": {
-      let subject = (["location", "vehicle", "companion", "car_handover", "other"].includes(args.subject) ? args.subject : "other") as Subject;
+      const custom = !!CASE.custom;
+      const SUBJECTS = custom ? ["location", "vehicle", "companion", "activity", "other"] : ["location", "vehicle", "companion", "car_handover", "other"];
+      let subject = (SUBJECTS.includes(args.subject) ? args.subject : "other") as Subject;
       const rawVal = String(args.value ?? "").trim().toLowerCase();
+      if (!rawVal || !String(args.quote ?? "").trim()) return { error: "empty claim" };
+      if (!custom) {
       if (["lent_to_daniel", "returned_by_daniel", "not_lent"].includes(rawVal.replace(/[\s-]+/g, "_"))) subject = "car_handover";
       if (subject === "other" && ["daniel", "tunde", "none", "alone"].includes(rawVal)) subject = "companion";
       // Where a car was kept ("mine was at the mechanic") is a detail, not which vehicle they drove.
@@ -223,15 +229,16 @@ export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx):
         subject = "companion";
         args = { ...args, value: room === "tunde" ? "daniel" : "tunde" };
       }
+      }
       const about: RoomId = args.about === "daniel" || args.about === "tunde" ? args.about : room;
       const claim: Claim = {
         id: store.nextId("C"),
         room,
         about,
         subject,
-        value: normValue(subject, args.value),
-        time: normTime(args.time),
-        timeEnd: normTime(args.time_end),
+        value: custom ? String(args.value).replace(/\s+/g, " ").trim().slice(0, 80) : normValue(subject, args.value),
+        time: normTime(args.time, !custom),
+        timeEnd: normTime(args.time_end, !custom),
         quote: String(args.quote ?? "").slice(0, 300),
         saidAt: store.clock(room),
         status: "ACTIVE",
@@ -345,8 +352,8 @@ export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx):
       store.setRoom(room, { approval: { id, reason, question, sourceIds } });
       const act = store.log(room, { kind: "gate", label: `Awaiting investigator · ${reason.replace(/_/g, " ").toLowerCase()}`, detail: `"${question}"`, refs: sourceIds, status: "running" });
       return new Promise((resolve) => {
-        approvals.set(room, (d) => {
-          approvals.delete(room);
+        approvals.set(akey(room), (d) => {
+          approvals.delete(akey(room));
           if (d.decision === "reject") {
             store.setRoom(room, { approval: undefined });
             store.patchActivity(act, { status: "error", label: "Investigator rejected question" });

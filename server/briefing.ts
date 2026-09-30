@@ -1,4 +1,5 @@
-import { first, store } from "./caseStore.js";
+import { CASE, first, store } from "./caseStore.js";
+import { redact } from "./guardrails.js";
 import type { RoomId } from "./types.js";
 
 const pretty = (v: string) => v.replace(/_/g, " ");
@@ -11,6 +12,12 @@ const name = (r: RoomId) => first(r);
 export function briefingFor(room: RoomId) {
   const other: RoomId = room === "daniel" ? "tunde" : "daniel";
   const items: { agent: string; console: string; claimId: string }[] = [];
+  if (CASE.custom) {
+    for (const c of store.claims.filter((x) => x.room === other && x.status === "ACTIVE" && (x.about === room || x.subject === "companion"))) {
+      items.push({ agent: redact(`Another account says ${c.about === room ? "they" : "someone"} ${c.subject === "companion" ? "was with" : "was"} ${pretty(c.value)}${c.time ? ` around ${c.time}` : ""}.`), console: `${name(other)}: "${c.quote}"`, claimId: c.id });
+    }
+    return { from: other, items: items.slice(0, 4) };
+  }
   for (const c of store.claims.filter((x) => x.room === other && x.status === "ACTIVE")) {
     const at = c.time ? ` around ${c.time}` : "";
     if (c.subject === "car_handover" && c.value === "lent_to_daniel" && room === "daniel")

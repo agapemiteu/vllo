@@ -1,6 +1,13 @@
 // Gapless PCM16 24 kHz playback queue. flush() silences the agent instantly on barge-in.
 export class Player {
-  private ctx = new AudioContext({ sampleRate: 24000 });
+  // Some browsers refuse a 24 kHz context; a native-rate one still plays 24 kHz buffers (the browser resamples).
+  private ctx = (() => {
+    try {
+      return new AudioContext({ sampleRate: 24000 });
+    } catch {
+      return new AudioContext();
+    }
+  })();
   private analyser = this.ctx.createAnalyser();
   private nextTime = 0;
   private sources = new Set<AudioBufferSourceNode>();
@@ -17,7 +24,8 @@ export class Player {
   }
 
   enqueue(buf: ArrayBuffer) {
-    const pcm = new Int16Array(buf);
+    // A truncated chunk (odd byte count) would throw; drop the stray byte.
+    const pcm = new Int16Array(buf.byteLength % 2 ? buf.slice(0, buf.byteLength - 1) : buf);
     if (!pcm.length) return;
     const audio = this.ctx.createBuffer(1, pcm.length, 24000);
     const ch = audio.getChannelData(0);
@@ -54,6 +62,6 @@ export class Player {
 
   close() {
     this.flush();
-    this.ctx.close();
+    this.ctx.close().catch(() => {});
   }
 }

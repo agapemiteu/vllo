@@ -1,5 +1,5 @@
 import type { Store } from "./caseStore.js";
-import { first } from "./caseStore.js";
+import { CASE, first } from "./caseStore.js";
 import { locationAt, toMin } from "./conflicts.js";
 import type { Claim, RoomId } from "./types.js";
 
@@ -24,6 +24,7 @@ export interface Comparison {
 
 /** Facts: statements that at least one account makes and that another account or the evidence supports. */
 export function facts(s: Store): Fact[] {
+  if (CASE.custom) return sharedFacts(s, []);
   const out: Fact[] = [];
   const danVehicle = latest(s, (c) => c.subject === "vehicle" && c.about === "daniel");
   const handover = latest(s, (c) => c.subject === "car_handover" && c.room === "tunde");
@@ -39,6 +40,11 @@ export function facts(s: Store): Fact[] {
   if (dc?.value === "tunde" && tc?.value === "daniel")
     out.push({ id: "F-together", text: `${first("daniel")} and ${first("tunde")} were together${tc.time ? ` around ${tc.time}` : ""}`, status: "corroborated", sources: [dc.id, tc.id] });
 
+  return sharedFacts(s, out);
+}
+
+/** Facts both people stated the same way. */
+function sharedFacts(s: Store, out: Fact[]): Fact[] {
   // Any fact both rooms state identically about the same person
   const seen = new Set(out.flatMap((f) => f.sources));
   for (const a of active(s)) {
@@ -54,6 +60,7 @@ function describeLoc(c: Claim | null) {
 }
 
 export function compare(s: Store): Comparison[] {
+  if (CASE.custom) return [];
   const rows: Comparison[] = [];
 
   const dv = latest(s, (c) => c.subject === "vehicle" && c.about === "daniel" && c.room === "daniel");
