@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: vllo
+    runtime: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: ASSEMBLYAI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: VLLO_LLM
+        value: managed
+      - key: GROQ_EXTRACT_MODEL
+        value: openai/gpt-oss-20b
+      - key: GROQ_RESEARCH_MODEL
+        value: openai/gpt-oss-120b
+      - key: VLLO_VOICE
+        value: charles

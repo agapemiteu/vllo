@@ -1,5 +1,5 @@
 /**
- * Web intelligence via Groq compound models (built-in web search).
+ * Web intelligence via Groq models with built-in web search (gpt-oss browser_search or compound).
  * Runs async: the interview never waits on it. Findings are pushed back into the agent's context.
  */
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -12,15 +12,17 @@ export interface ResearchResult {
 export async function webResearch(query: string, purpose: string): Promise<ResearchResult> {
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new Error("GROQ_API_KEY not set");
-  const model = process.env.GROQ_RESEARCH_MODEL || "groq/compound-mini";
+  const model = process.env.GROQ_RESEARCH_MODEL || "openai/gpt-oss-120b";
 
   const res = await fetch(GROQ_URL, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(25_000),
+    signal: AbortSignal.timeout(40_000),
     body: JSON.stringify({
       model,
       temperature: 0.2,
+      // gpt-oss models on Groq ship a built-in browser tool; compound models search natively.
+      ...(model.startsWith("openai/gpt-oss") ? { tools: [{ type: "browser_search" }], tool_choice: "required" } : {}),
       messages: [
         {
           role: "system",
@@ -39,7 +41,7 @@ export async function webResearch(query: string, purpose: string): Promise<Resea
   const sources: ResearchResult["sources"] = [];
   const seen = new Set<string>();
   for (const t of msg.executed_tools ?? []) {
-    for (const r of t?.search_results?.results ?? []) {
+    for (const r of [...(t?.search_results?.results ?? []), ...(t?.browser_results ?? [])]) {
       if (r?.url && !seen.has(r.url) && sources.length < 4) {
         seen.add(r.url);
         sources.push({ title: String(r.title ?? r.url).slice(0, 90), url: r.url });

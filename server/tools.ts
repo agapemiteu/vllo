@@ -107,6 +107,9 @@ export function releaseApproval(room: RoomId) {
   approvals.get(room)?.({ decision: "approve" });
 }
 
+/** Tools the voice agent sees. Claims are extracted server-side from every utterance instead. */
+export const AGENT_TOOLS = TOOLS.filter((t) => t.name !== "record_claim");
+
 export interface ToolCtx {
   end: (reason: string) => void;
   inject: (text: string) => void;
@@ -119,10 +122,42 @@ const VALUE_ALIASES: Record<string, Record<string, string>> = {
   car_handover: { lent: "lent_to_daniel", returned: "returned_by_daniel", "not lent": "not_lent" },
 };
 
+const ALLOWED: Record<string, string[]> = {
+  location: ["work", "warehouse_area", "fuel_station", "home", "other"],
+  vehicle: ["own_car", "tunde_corolla", "other", "unknown"],
+  companion: ["none", "daniel", "tunde", "other"],
+  car_handover: ["lent_to_daniel", "returned_by_daniel", "not_lent"],
+};
+
+/** Map loose model output onto the fixed value sets, so the conflict rules never depend on phrasing. */
 function normValue(subject: Subject, v: string) {
   const raw = String(v ?? "").trim().toLowerCase();
   if (subject === "other") return String(v).trim();
-  return VALUE_ALIASES[subject]?.[raw] ?? raw.replace(/[\s-]+/g, "_");
+  const alias = VALUE_ALIASES[subject]?.[raw] ?? raw.replace(/[\s-]+/g, "_");
+  if (ALLOWED[subject]?.includes(alias)) return alias;
+  const has = (...w: string[]) => w.some((x) => raw.includes(x));
+  switch (subject) {
+    case "location":
+      if (has("warehouse", "admiralty")) return "warehouse_area";
+      if (has("work", "job", "shift", "office")) return "work";
+      if (has("fuel", "petrol", "filling")) return "fuel_station";
+      if (has("home", "house", "flat")) return "home";
+      return "other";
+    case "vehicle":
+      if (has("corolla", "tunde", "friend")) return "tunde_corolla";
+      if (has("own", "my car", "mine")) return "own_car";
+      return has("unknown", "not sure") ? "unknown" : "other";
+    case "companion":
+      if (has("alone", "nobody", "no one", "none", "myself")) return "none";
+      if (has("tunde")) return "tunde";
+      if (has("daniel")) return "daniel";
+      return "other";
+    case "car_handover":
+      if (has("return", "back")) return "returned_by_daniel";
+      if (has("not", "never", "didn")) return "not_lent";
+      return "lent_to_daniel";
+  }
+  return alias;
 }
 
 function normTime(t?: string) {
@@ -133,6 +168,8 @@ function normTime(t?: string) {
   let h = Number(m[1]);
   const min = Number(m[2] ?? 0);
   if (m[3] === "pm" && h < 12) h += 12;
+  // Case window is the evening: a bare "9:05" or "8" means 21:05 / 20:00.
+  if (!m[3] && h >= 1 && h <= 11) h += 12;
   if (m[3] === "am" && h === 12) h = 0;
   if (h > 23 || min > 59) return undefined;
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
@@ -145,7 +182,7 @@ const agentConflict = (c: Conflict) => ({
   challenge_hint: redact(c.challengeHint),
 });
 
-function drainPending(room: RoomId) {
+export function drainPending(room: RoomId) {
   const ids = store.pending[room];
   store.pending[room] = [];
   return ids.map((id) => store.conflicts.find((c) => c.id === id)!).filter((c) => c?.status === "OPEN").map(agentConflict);
@@ -168,7 +205,14 @@ const SUBJECT_LABEL: Record<string, string> = {
 export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx): unknown {
   switch (name) {
     case "record_claim": {
-      const subject = (["location", "vehicle", "companion", "car_handover", "other"].includes(args.subject) ? args.subject : "other") as Subject;
+      let subject = (["location", "vehicle", "companion", "car_handover", "other"].includes(args.subject) ? args.subject : "other") as Subject;
+      const rawVal = String(args.value ?? "").trim().toLowerCase();
+      if (["lent_to_daniel", "returned_by_daniel", "not_lent"].includes(rawVal.replace(/[\s-]+/g, "_"))) subject = "car_handover";
+      if (subject === "other" && ["daniel", "tunde", "none", "alone"].includes(rawVal)) subject = "companion";
+      if (subject === "other" && /\bwith (him|daniel|tunde)\b/i.test(String(args.quote ?? ""))) {
+        subject = "companion";
+        args = { ...args, value: room === "tunde" ? "daniel" : "tunde" };
+      }
       const about: RoomId = args.about === "daniel" || args.about === "tunde" ? args.about : room;
       const claim: Claim = {
         id: store.nextId("C"),
@@ -248,6 +292,26 @@ export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx):
       }
       const sourceIds = Array.isArray(args.source_ids) ? args.source_ids.map(String) : [];
       const reason = String(args.reason ?? "NEW_FACT");
+
+      // Investigative priority, enforced in code: once the free account is in, open conflicts come first.
+      const CONFLICT_REASONS = ["INTERNAL_CONFLICT", "EXTERNAL_CONFLICT", "CROSS_ACCOUNT_CONFLICT"];
+      const asked = store.activity.filter((a) => a.room === room && a.kind === "gate" && a.status === "done").length;
+      const RANK: Record<string, number> = { CROSS_ACCOUNT_CONFLICT: 0, EXTERNAL_CONFLICT: 1, INTERNAL_CONFLICT: 2 };
+      const due = store.conflicts
+        .filter((c) => c.status === "OPEN" && c.rooms.includes(room) && !c.challenged)
+        .sort((a, b) => RANK[a.type] - RANK[b.type] || a.createdAt - b.createdAt);
+      if (CONFLICT_REASONS.includes(reason)) {
+        const target = due.find((c) => sourceIds.includes(c.id)) ?? due.find((c) => c.type === reason) ?? due[0];
+        if (target) target.challenged = true;
+      } else if (asked >= 1 && due.length && reason !== "CLOSING") {
+        const c = due[0];
+        store.log(room, { kind: "gate", label: `Redirected to ${c.id} · ${c.topic}`, detail: `Open ${c.type.replace(/_/g, " ").toLowerCase()} outranks ${reason.replace(/_/g, " ").toLowerCase()}`, refs: [c.id], status: "warn" });
+        return {
+          approved: false,
+          violation: "PRIORITY",
+          instruction: `An open case update must be raised first. ${c.id} (${c.type}, ${c.topic}): ${redact(c.challengeHint)} Ask one open, neutral question about it with reason ${c.type} and source_ids ["${c.id}"], then call set_next_question again.`,
+        };
+      }
       const approve = (q: string, edited: boolean) => {
         store.setRoom(room, { lastQuestion: { reason, question: q, sourceIds }, approval: undefined });
         store.log(room, {

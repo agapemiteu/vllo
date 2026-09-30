@@ -125,7 +125,7 @@ export function evaluate(s: Store, triggerRoom: RoomId) {
     for (let j = i + 1; j < act.length; j++) {
       const a = act[i], b = act[j];
       if (a.room !== b.room || a.subject !== b.subject || a.about !== b.about || a.value === b.value) continue;
-      if (a.subject === "other") continue;
+      if (a.subject === "other" || a.subject === "car_handover") continue;
       if (b.revises) continue;
       const isLoc = a.subject === "location";
       if (!overlaps(a, b, isLoc ? 10 : 15, isLoc)) continue;
@@ -175,6 +175,7 @@ export function evaluate(s: Store, triggerRoom: RoomId) {
 
   s.gaps = computeGaps(s);
   updateObjectives(s);
+  if (created.length) s.emit("pending");
   return { created, resolved };
 }
 

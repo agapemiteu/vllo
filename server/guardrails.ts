@@ -61,4 +61,5 @@ export const END_WORDS: Record<string, string> = {
   welfare: "The interview was paused for your welfare",
   objectives_complete: "All questions were covered",
   investigator: "The investigator ended the session",
+  time_limit: "The interview reached its time limit",
 };

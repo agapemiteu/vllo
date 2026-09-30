@@ -35,6 +35,8 @@ export interface Conflict {
   summary: string;
   challengeHint: string;
   createdAt: number;
+  /** A question about this conflict has been put to the interviewee */
+  challenged?: boolean;
 }
 
 export interface GuardrailEvent {

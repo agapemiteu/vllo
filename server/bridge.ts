@@ -1,18 +1,16 @@
 import WebSocket from "ws";
 import { store } from "./caseStore.js";
 import { checkAgentTranscript, checkUserTranscript, END_WORDS } from "./guardrails.js";
+import { agentFor, groqLlm } from "./agents.js";
+import { extractClaims } from "./extractor.js";
 import { greeting, systemPrompt } from "./prompt.js";
-import { handleTool, releaseApproval, TOOLS } from "./tools.js";
+import { AGENT_TOOLS, drainPending, handleTool, releaseApproval, type ToolCtx } from "./tools.js";
 import type { RoomId } from "./types.js";
 
 const AAI_URL = "wss://agents.assemblyai.com/v1/ws";
 const REMINDER = "\n\nReminder: never accuse, never reveal sources or name other interviewees, never pressure.";
 
-function llmConfig() {
-  const key = process.env.GROQ_API_KEY;
-  if (!key || process.env.VLLO_LLM === "managed") return undefined;
-  return [{ base_url: "https://api.groq.com/openai/v1", model: process.env.GROQ_MODEL || "openai/gpt-oss-120b", api_key: key }];
-}
+const KEYTERMS = ["Tunde", "Daniel", "Corolla", "Admiralty Way", "Lekki", "warehouse", "Ajah", "Lekki Phase 1"];
 
 export class RoomBridge {
   private browser: WebSocket | null = null;
@@ -25,12 +23,70 @@ export class RoomBridge {
   private ending: string | null = null;
   private endTimer: NodeJS.Timeout | null = null;
   private resumed = false;
-  private useLlm = true;
+  /** Stored agent bound to Groq; null means inline config on the managed model. */
+  private agentId: string | null = null;
   private flagged = false;
   private prompt = "";
 
+  private lastAgentText = "";
+  /** Rights phrase heard in the transcript; it names the end reason even if the model picks another. */
+  private trigger: string | null = null;
+  private extracting: Promise<void> = Promise.resolve();
+  private heardBuffer: string[] = [];
+  private heardTimer: NodeJS.Timeout | null = null;
+  private capTimer: NodeJS.Timeout | null = null;
+
+  /** Speech arrives in fragments; extract once the speaker pauses so claims see whole sentences. */
+  private bufferHeard(text: string) {
+    this.heardBuffer.push(text);
+    if (this.heardTimer) clearTimeout(this.heardTimer);
+    this.heardTimer = setTimeout(() => this.flushHeard(), 1400);
+  }
+
+  private flushHeard() {
+    if (this.heardTimer) clearTimeout(this.heardTimer);
+    this.heardTimer = null;
+    const text = this.heardBuffer.join(" ").replace(/\s+/g, " ").trim();
+    this.heardBuffer = [];
+    if (text) this.extract(text);
+  }
+
   constructor(readonly room: RoomId) {
     store.on("change", () => this.pushRoomState());
+    store.on("pending", () => this.deliverPending());
+  }
+
+  /** Conflicts meant for this room reach the agent as redacted system context, never with names or quotes. */
+  private deliverPending() {
+    if (!this.ready || this.state.status !== "LIVE" || !store.pending[this.room].length) return;
+    const items = drainPending(this.room);
+    if (!items.length) return;
+    const lines = items.map((c) => `${c.id} (${c.type}, ${c.topic}): ${c.challenge_hint}`).join(" ");
+    this.sendUp({ type: "conversation.message", role: "system", content: `Case update. ${lines} Raise it in the challenge phase with an open, neutral question. Never say where the information came from.` });
+  }
+
+  private toolCtx(): ToolCtx {
+    return {
+      end: (reason) => {
+        this.ending = this.trigger ?? reason;
+        this.scheduleFinish(9000);
+      },
+      inject: (text) => this.sendUp({ type: "conversation.message", role: "system", content: text }),
+    };
+  }
+
+  /** Server-side claim extraction, serialised per room so revisions see earlier claims. */
+  private extract(text: string) {
+    const lastQ = this.state.lastQuestion?.question ?? this.lastAgentText;
+    this.extracting = this.extracting.then(async () => {
+      try {
+        const claims = await extractClaims(this.room, text, lastQ);
+        for (const c of claims) handleTool(this.room, "record_claim", c, this.toolCtx());
+      } catch (e: any) {
+        console.error(`[${this.room}] extraction failed`, e.message);
+        store.log(this.room, { kind: "system", label: "Claim extraction failed", detail: String(e.message).slice(0, 140), status: "error" });
+      }
+    });
   }
 
   get state() {
@@ -73,11 +129,24 @@ export class RoomBridge {
       return;
     }
     this.ending = null;
+    this.trigger = null;
     this.resumed = false;
     this.flagged = false;
     this.prompt = systemPrompt(this.room);
     store.setRoom(this.room, { status: "CONNECTING", caption: "", userPartial: "", endReason: undefined, startedAt: Date.now(), endedAt: undefined });
-    this.connect(false);
+    this.agentId = null;
+    const llm = groqLlm();
+    if (!llm) return this.connect(false);
+    agentFor(this.room)
+      .then((id) => {
+        this.agentId = id;
+        store.log(this.room, { kind: "system", label: "Reasoning on Groq", detail: `${llm.model} · stored agent vllo-${this.room}`, status: "done" });
+      })
+      .catch((e) => {
+        console.error(`[${this.room}] stored agent failed`, e.message);
+        store.log(this.room, { kind: "system", label: "Groq agent unavailable, using AssemblyAI managed model", detail: String(e.message).slice(0, 160), status: "warn" });
+      })
+      .finally(() => this.connect(false));
   }
 
   private connect(resume: boolean) {
@@ -91,22 +160,20 @@ export class RoomBridge {
         ws.send(JSON.stringify({ type: "session.resume", session_id: this.sessionId }));
         return;
       }
-      const llm = this.useLlm ? llmConfig() : undefined;
+      if (this.agentId) {
+        ws.send(JSON.stringify({ type: "session.update", session: { agent_id: this.agentId } }));
+        return;
+      }
       ws.send(JSON.stringify({
         type: "session.update",
         session: {
           system_prompt: this.prompt,
           greeting: greeting(this.room),
-          tools: TOOLS,
-          input: {
-            format: { encoding: "audio/pcm" },
-            keyterms: ["Tunde", "Daniel", "Corolla", "Admiralty Way", "Lekki", "warehouse", "Ajah", "Lekki Phase 1"],
-          },
+          tools: AGENT_TOOLS,
+          input: { format: { encoding: "audio/pcm" }, keyterms: KEYTERMS },
           output: { voice: process.env.VLLO_VOICE || "charles", format: { encoding: "audio/pcm" } },
-          ...(llm ? { llm } : {}),
         },
       }));
-      if (llm) store.log(this.room, { kind: "system", label: "Reasoning on Groq", detail: llm[0].model, status: "done" });
     });
 
     ws.on("message", (raw) => {
@@ -125,9 +192,9 @@ export class RoomBridge {
         store.log(this.room, { kind: "system", label: "Connection dropped, resuming session", status: "running" });
         return this.connect(true);
       }
-      if (this.state.status === "CONNECTING" && this.useLlm && llmConfig()) {
-        this.useLlm = false;
-        store.log(this.room, { kind: "system", label: "Custom LLM rejected, using AssemblyAI managed model", status: "warn" });
+      if (this.state.status === "CONNECTING" && this.agentId) {
+        this.agentId = null;
+        store.log(this.room, { kind: "system", label: "Groq agent rejected, using AssemblyAI managed model", status: "warn" });
         return this.connect(false);
       }
       store.setRoom(this.room, { status: "DISCONNECTED", agentState: "LISTENING" });
@@ -159,6 +226,17 @@ export class RoomBridge {
       case "session.ready":
         this.ready = true;
         this.sessionId = ev.session_id;
+        if (!this.resumed) {
+          const cap = Number(process.env.VLLO_MAX_SECONDS || 240) * 1000;
+          if (this.capTimer) clearTimeout(this.capTimer);
+          this.capTimer = setTimeout(() => {
+            if (this.state.status !== "LIVE" || this.ending) return;
+            store.log(room, { kind: "end", label: "Time limit reached", status: "warn" });
+            this.ending = "time_limit";
+            this.sendUp({ type: "reply.create", instructions: "Say only: Thank you. We have reached the time for this interview." });
+            this.scheduleFinish(7000);
+          }, cap);
+        }
         store.setRoom(room, { status: "LIVE", agentState: "SPEAKING" });
         if (!this.resumed) store.log(room, { kind: "system", label: "Session live", detail: `AssemblyAI Voice Agent · ${ev.session_id}`, status: "done" });
         else store.log(room, { kind: "system", label: "Session resumed", status: "done" });
@@ -166,9 +244,9 @@ export class RoomBridge {
 
       case "session.error":
         console.error(`[${room}] session.error`, ev.code, ev.message, ev.param ?? "");
-        if (!this.ready && this.useLlm && llmConfig() && (String(ev.param ?? "").includes("llm") || ["invalid_config", "invalid_value", "invalid_format", "agent_init_failed"].includes(ev.code))) {
-          this.useLlm = false;
-          store.log(room, { kind: "system", label: "Custom LLM rejected, using AssemblyAI managed model", detail: ev.message, status: "warn" });
+        if (!this.ready && this.agentId && !["at_capacity", "concurrency_exceeded"].includes(ev.code)) {
+          this.agentId = null;
+          store.log(room, { kind: "system", label: "Groq agent rejected, using AssemblyAI managed model", detail: ev.message, status: "warn" });
           this.upstream = null;
           ws.close();
           this.connect(false);
@@ -192,8 +270,10 @@ export class RoomBridge {
         if (!text) break;
         store.say(room, "interviewee", text);
         store.log(room, { kind: "heard", label: text, status: "done" });
+        this.bufferHeard(text);
         const trigger = checkUserTranscript(text);
         if (trigger && !this.ending) {
+          this.trigger = trigger;
           store.guard(room, trigger.toUpperCase(), "ENDED", `"${text}"`);
           setTimeout(() => {
             if (!this.ending && this.state.status === "LIVE") {
@@ -228,6 +308,7 @@ export class RoomBridge {
         const text = String(ev.text ?? "").trim();
         if (!text) break;
         store.setRoom(room, { caption: text });
+        this.lastAgentText = text;
         store.say(room, "agent", text, !!ev.interrupted);
         store.log(room, { kind: "said", label: text, status: ev.interrupted ? "warn" : "done", interrupted: !!ev.interrupted });
         const breach = checkAgentTranscript(text, room);
@@ -263,13 +344,7 @@ export class RoomBridge {
         let result: unknown;
         const callId = ev.call_id;
         try {
-          result = handleTool(room, ev.name, ev.arguments ?? {}, {
-            end: (reason) => {
-              this.ending = reason;
-              this.scheduleFinish(9000);
-            },
-            inject: (text) => this.sendUp({ type: "conversation.message", role: "system", content: text }),
-          });
+          result = handleTool(room, ev.name, ev.arguments ?? {}, this.toolCtx());
         } catch (e: any) {
           console.error(`[${room}] tool ${ev.name} failed`, e);
           result = { error: `Tool failed: ${e.message}. Continue the interview.` };
@@ -316,6 +391,8 @@ export class RoomBridge {
 
   private markEnded(reason: string) {
     if (this.state.status === "ENDED") return;
+    if (this.capTimer) clearTimeout(this.capTimer);
+    this.flushHeard();
     releaseApproval(this.room);
     this.ready = false;
     store.setRoom(this.room, { status: "ENDED", agentState: "LISTENING", endReason: reason, endedAt: Date.now() });
@@ -325,6 +402,9 @@ export class RoomBridge {
   }
 
   hardReset() {
+    if (this.capTimer) clearTimeout(this.capTimer);
+    if (this.heardTimer) clearTimeout(this.heardTimer);
+    this.heardBuffer = [];
     releaseApproval(this.room);
     if (this.endTimer) clearTimeout(this.endTimer);
     if (this.state.status === "LIVE") this.sendUp({ type: "session.end" });
@@ -335,7 +415,6 @@ export class RoomBridge {
     this.sessionId = null;
     this.pendingResults = [];
     this.ending = null;
-    this.useLlm = true;
     this.sendBrowser({ type: "flush" });
   }
 }

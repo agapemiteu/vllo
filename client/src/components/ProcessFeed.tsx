@@ -16,6 +16,7 @@ function describe(a: Activity): { verb: string; arg: string; out?: string } {
     case "resolved":
       return { verb: a.label.startsWith("Statement revised") ? "Revise" : "Resolve", arg: a.label.replace(/^Statement revised: |^Resolved /, ""), out: a.detail };
     case "gate":
+      if (a.label.startsWith("Redirected to ")) return { verb: "Prioritise", arg: a.label.replace("Redirected to ", ""), out: a.detail };
       return { verb: "Ask", arg: after(a.label), out: a.detail };
     case "blocked":
       return { verb: "Guardrail", arg: `blocked ${after(a.label)}`, out: a.detail };
