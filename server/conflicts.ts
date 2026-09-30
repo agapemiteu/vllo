@@ -76,11 +76,13 @@ export function evaluate(s: Store, triggerRoom: RoomId) {
   // R2 vehicle vs CCTV + registry
   const danVehicle = latest(s, (c) => c.subject === "vehicle" && c.about === "daniel" && c.room === "daniel");
   {
-    if (danVehicle?.value === "own_car") {
+    // Any vehicle other than the Corolla (own car, taxi, bike...) contradicts the camera.
+    if (danVehicle && danVehicle.value !== "tunde_corolla" && danVehicle.value !== "unknown") {
+      const how = danVehicle.value === "own_car" ? "he drove his own car" : `he used ${danVehicle.value === "other" ? `another vehicle ("${danVehicle.quote}")` : danVehicle.value.replace(/_/g, " ")}`;
       drafts.push({
         key: "R2", rule: "R2", type: "EXTERNAL_CONFLICT", topic: "vehicle",
         claimIds: [danVehicle.id], evidenceIds: ["E1", "E3"], rooms: ["daniel"],
-        summary: `${first("daniel")} says he drove his own car. CCTV shows ${first("tunde")}'s grey Corolla leaving Admiralty Way at 21:17.`,
+        summary: `${first("daniel")} says ${how}. CCTV shows ${first("tunde")}'s grey Corolla leaving Admiralty Way at 21:17.`,
         challengeHint: HINTS.R2,
       });
     }

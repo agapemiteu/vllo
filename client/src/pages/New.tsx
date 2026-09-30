@@ -17,7 +17,7 @@ export default function New() {
   const [notes, setNotes] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [start, setStart] = useState<Start>("manual");
-  const [duration, setDuration] = useState(60);
+  const [duration, setDuration] = useState(90);
   const [email, setEmail] = useState(() => { try { return localStorage.getItem("vllo-email") ?? ""; } catch { return ""; } });
   const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);

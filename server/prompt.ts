@@ -5,7 +5,7 @@ const person = (id: RoomId) => CASE.interviewees.find((p: any) => p.id === id);
 
 export function greeting(room: RoomId) {
   const first = person(room).name.split(" ")[0];
-  return `Hello ${first}. I'm vllo, an AI interviewer working on an investigation. You don't have to answer any question, you can stop at any time, and you can ask for a lawyer. To begin, please tell me everything you did on Monday evening, from about eight o'clock.`;
+  return `Hello ${first}, I'm vllo, an AI investigator. You can stop at any time or ask for a lawyer. Tell me what you did on Monday evening, from eight o'clock.`;
 }
 
 /** Kept short on purpose: every token here is paid on every turn. */
