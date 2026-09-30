@@ -36,10 +36,10 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-3xl px-6 pt-10 pb-20">
-        <p className="text-[13px] font-medium tracking-wide text-amber-700">Voice AI for criminal investigations</p>
-        <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">An AI detective that interviews your suspects.</h1>
+        <p className="text-[13px] font-medium tracking-wide text-amber-700">Voice AI for investigations and verification</p>
+        <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">An AI detective that interviews suspects and witnesses.</h1>
         <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-stone-600">
-          vllo interviews suspects and witnesses by voice. It questions them, cross-checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report.
+          vllo interviews people by voice, checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report. Built for investigators, HR, legal and compliance teams.
         </p>
         {s && (
           <a href="/new" className="mt-8 inline-block">

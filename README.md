@@ -1,6 +1,8 @@
 # vllo
 
-vllo is an AI detective that interviews suspects and witnesses by voice. It questions them, cross-checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report.
+vllo is an AI detective that interviews suspects and witnesses by voice. It checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report.
+
+Built for investigators, HR teams, legal and compliance teams, insurers and any organisation that needs to hear accounts and verify them.
 
 - Live app: https://vllo.vercel.app
 - Backend: https://vllo.onrender.com
