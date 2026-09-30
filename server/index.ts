@@ -132,7 +132,8 @@ setOnRoomEnded(() => {
       store.changed();
     }
   }
-  if (ROOMS.every((r) => store.rooms[r].status === "ENDED")) {
+  // Report as soon as any interview ends; it covers everyone interviewed so far.
+  {
     store.report = buildReport();
     store.changed();
     saveSession();

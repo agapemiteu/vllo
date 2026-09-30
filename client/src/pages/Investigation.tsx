@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { motion, AnimatePresence } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -54,7 +54,16 @@ function mailto(s: Snapshot, id: RoomId) {
 export default function Investigation({ id }: { id: RoomId }) {
   const { state: s, send } = useConsole();
   const [copied, setCopied] = useState(false);
+  const [wantReport, setWantReport] = useState(false);
+  const reportRef = useRef<HTMLElement>(null);
   useTick(500);
+  const hasReport = !!s?.report;
+  useEffect(() => {
+    if (wantReport && hasReport) {
+      reportRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setWantReport(false);
+    }
+  }, [wantReport, hasReport]);
 
   if (!s)
     return (
@@ -221,7 +230,10 @@ export default function Investigation({ id }: { id: RoomId }) {
                     <HugeiconsIcon icon={Mail01Icon} size={15} /> {plan.email ? `Email report to ${plan.email}` : "Email report"}
                   </Button>
                 </a>
-                <Button variant="outline" className="w-full" onClick={() => send({ type: "report" })}>
+                <Button variant="outline" className="w-full" onClick={() => {
+                    if (!s.report) send({ type: "report" });
+                    setWantReport(true);
+                  }}>
                   <HugeiconsIcon icon={FileValidationIcon} size={15} /> View full report
                 </Button>
               </div>
@@ -230,7 +242,7 @@ export default function Investigation({ id }: { id: RoomId }) {
         </section>
 
         {s.report && ended && (
-          <section className="mt-8 overflow-hidden rounded-2xl border">
+          <section ref={reportRef} className="mt-8 scroll-mt-4 overflow-hidden rounded-2xl border">
             <Report r={s.report} onClose={() => send({ type: "close_report" })} />
           </section>
         )}

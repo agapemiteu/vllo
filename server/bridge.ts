@@ -79,6 +79,19 @@ export class RoomBridge {
     };
   }
 
+  private lastObjectives = "";
+
+  /** What this interview still has to establish; the agent's next question should move one of these forward. */
+  private pressObjectives() {
+    if (this.ending || this.state.status !== "LIVE") return;
+    const RELEVANT: Record<string, string[]> = { daniel: ["O1", "O2", "O3", "O4"], tunde: ["O1", "O2", "O4"] };
+    const open = store.objectives.filter((o) => !o.resolved && RELEVANT[this.room].includes(o.id));
+    const key = open.map((o) => o.id).join(",");
+    if (!open.length || key === this.lastObjectives) return;
+    this.lastObjectives = key;
+    this.addContext(`Still to establish: ${open.map((o) => o.text).join("; ")}. Make your next question move one of these forward: exact times, the vehicle, who they were with, and why they were there.`);
+  }
+
   /** New specifics become leads; places and businesses get checked on the web; the best one goes to the agent to pursue. */
   private openThreads(threads: Thread[], quote: string) {
     if (this.ending || this.trigger || this.state.status !== "LIVE") return;
@@ -114,6 +127,7 @@ export class RoomBridge {
         const { claims, threads } = await extractClaims(this.room, text, lastQ, previous);
         for (const c of claims) handleTool(this.room, "record_claim", c, this.toolCtx());
         this.openThreads(threads, text);
+        this.pressObjectives();
       } catch (e: any) {
         console.error(`[${this.room}] extraction failed`, e.message);
         store.log(this.room, { kind: "system", label: "Claim extraction failed", detail: String(e.message).slice(0, 140), status: "error" });
@@ -193,6 +207,7 @@ export class RoomBridge {
     this.trigger = null;
     this.contextQueue = [];
     this.lastHeard = "";
+    this.lastObjectives = "";
     this.resumed = false;
     this.flagged = false;
     this.prompt = systemPrompt(this.room);

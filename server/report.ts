@@ -11,7 +11,8 @@ const mmss = (ms: number) => {
 /** Deterministic: built only from recorded state. No model calls. */
 export function buildReport() {
   const claim = (id: string) => store.claim(id);
-  const interviews = ROOMS.map((r) => {
+  const seen = ROOMS.filter((r) => store.rooms[r].status !== "IDLE" || store.claims.some((c) => c.room === r));
+  const interviews = seen.map((r) => {
     const room = store.rooms[r];
     const p = CASE.interviewees.find((x: any) => x.id === r);
     const dur = room.startedAt ? (room.endedAt ?? Date.now()) - room.startedAt : 0;
@@ -41,7 +42,7 @@ export function buildReport() {
     }),
   }));
 
-  const timeline = ROOMS.map((r) => ({
+  const timeline = seen.map((r) => ({
     person: r,
     entries: store.claims
       .filter((c) => c.about === r && c.time)
