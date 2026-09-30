@@ -230,7 +230,9 @@ setInterval(() => {
   for (const r of ROOMS) {
     const p = store.plan[r];
     if (store.rooms[r].status !== "IDLE" || !p.checkedIn) continue;
-    if (p.armed || (p.scheduledAt && Date.now() >= p.scheduledAt)) {
+    // No slot and not queued behind someone: start on check-in, so the link works on its own (even after a server restart).
+    const onCheckIn = p.armed || (!p.scheduledAt && !p.after);
+    if (onCheckIn || (p.scheduledAt && Date.now() >= p.scheduledAt)) {
       p.armed = false;
       bridges[r].kickoff(p.scheduledAt ? "schedule" : "checkin");
     }
