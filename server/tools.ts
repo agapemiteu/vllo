@@ -2,7 +2,7 @@ import { store } from "./caseStore.js";
 import { evaluate, toMin } from "./conflicts.js";
 import { checkQuestion, redact } from "./guardrails.js";
 import { webResearch } from "./research.js";
-import type { Claim, Conflict, Lead, RoomId, Subject } from "./types.js";
+import type { Claim, Conflict, Intel, Lead, RoomId, Subject } from "./types.js";
 
 export const TOOLS = [
   {
@@ -93,6 +93,19 @@ export const TOOLS = [
     },
   },
 ];
+
+type Decision = { decision: "approve" | "reject"; question?: string; note?: string };
+const approvals = new Map<RoomId, (d: Decision) => void>();
+
+/** Investigator decision on a question drafted in assisted mode. */
+export function decide(room: RoomId, d: Decision) {
+  approvals.get(room)?.(d);
+}
+
+/** Room switched back to autonomous, ended or reset: let a held question through so the agent is never stuck. */
+export function releaseApproval(room: RoomId) {
+  approvals.get(room)?.({ decision: "approve" });
+}
 
 export interface ToolCtx {
   end: (reason: string) => void;
@@ -234,10 +247,47 @@ export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx):
         return { approved: false, violation: verdict.rule, instruction: verdict.instruction };
       }
       const sourceIds = Array.isArray(args.source_ids) ? args.source_ids.map(String) : [];
-      store.setRoom(room, { lastQuestion: { reason: String(args.reason ?? "NEW_FACT"), question, sourceIds } });
-      store.log(room, { kind: "gate", label: `Question approved · ${String(args.reason ?? "").replace(/_/g, " ").toLowerCase()}`, detail: `"${question}"`, refs: sourceIds, status: "done" });
-      const pending = drainPending(room);
-      return pending.length ? { approved: true, new_conflicts_since_last_check: pending } : { approved: true };
+      const reason = String(args.reason ?? "NEW_FACT");
+      const approve = (q: string, edited: boolean) => {
+        store.setRoom(room, { lastQuestion: { reason, question: q, sourceIds }, approval: undefined });
+        store.log(room, {
+          kind: "gate",
+          label: `${edited ? "Question edited by investigator" : "Question approved"} · ${reason.replace(/_/g, " ").toLowerCase()}`,
+          detail: `"${q}"`,
+          refs: sourceIds,
+          status: "done",
+        });
+        const pending = drainPending(room);
+        const res: any = { approved: true };
+        if (edited) res.instruction = `The investigator rewrote your question. Ask exactly this instead: "${q}"`;
+        if (pending.length) res.new_conflicts_since_last_check = pending;
+        return res;
+      };
+
+      if (store.rooms[room].mode !== "assisted") return approve(question, false);
+
+      // Assisted: hold the tool result until the investigator decides.
+      const id = store.nextId("Q");
+      store.setRoom(room, { approval: { id, reason, question, sourceIds } });
+      const act = store.log(room, { kind: "gate", label: `Awaiting investigator · ${reason.replace(/_/g, " ").toLowerCase()}`, detail: `"${question}"`, refs: sourceIds, status: "running" });
+      return new Promise((resolve) => {
+        approvals.set(room, (d) => {
+          approvals.delete(room);
+          if (d.decision === "reject") {
+            store.setRoom(room, { approval: undefined });
+            store.patchActivity(act, { status: "error", label: "Investigator rejected question" });
+            const why = d.note ? ` Investigator note: ${d.note}` : "";
+            return resolve({ approved: false, violation: "INVESTIGATOR_REJECTED", instruction: `Do not ask that. Choose a different open question.${why}` });
+          }
+          store.patchActivity(act, { status: "done", label: "Investigator approved" });
+          const q = (d.question ?? "").trim();
+          if (q && q !== question) {
+            const v = checkQuestion(q, room);
+            if (!v.ok) store.guard(room, v.rule, "FLAGGED", `Investigator edit: ${q}`);
+          }
+          resolve(approve(q || question, !!q && q !== question));
+        });
+      });
     }
 
     case "get_open_items": {
@@ -266,12 +316,12 @@ export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx):
       const mine = store.intel.filter((i) => i.room === room);
       if (mine.length >= 5) return { status: "skipped", reason: "Research budget for this interview is used. Continue with open items." };
       if (!process.env.GROQ_API_KEY) return { status: "unavailable" };
-      const intel = {
+      const intel: Intel = {
         id: store.nextId("W"),
         room,
         query: String(args.query ?? "").slice(0, 160),
         purpose: String(args.purpose ?? "").slice(0, 200),
-        status: "running" as const,
+        status: "running",
         at: store.clock(room),
       };
       store.intel.push(intel);

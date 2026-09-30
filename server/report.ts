@@ -1,5 +1,6 @@
 import { CASE, store } from "./caseStore.js";
 import { END_WORDS } from "./guardrails.js";
+import { insights } from "./insights.js";
 import { ROOMS } from "./types.js";
 
 const mmss = (ms: number) => {
@@ -51,6 +52,7 @@ export function buildReport() {
   return {
     generatedAt: new Date().toISOString(),
     title: `Case ${CASE.case_id} · ${CASE.title}`,
+    modes: { daniel: store.rooms.daniel.mode, tunde: store.rooms.tunde.mode },
     incident: CASE.incident,
     interviews,
     totals: {
@@ -69,6 +71,7 @@ export function buildReport() {
     leads: store.leads.map((l) => ({ ...l, at: mmss(l.at) })),
     research: store.intel.filter((i) => i.status === "done"),
     guardrails: store.guardrails.map((g) => ({ ...g, at: mmss(g.at) })),
+    insights: insights(store),
     principle: "vllo reports conflicts between statements and evidence. It does not assess truthfulness, emotion, or guilt.",
   };
 }

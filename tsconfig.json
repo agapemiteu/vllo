@@ -10,8 +10,7 @@
     "noEmit": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"],
-    "baseUrl": ".",
-    "paths": { "@/*": ["client/src/*"] }
+    "paths": { "@/*": ["./client/src/*"] }
   },
   "include": ["server", "scripts", "client/src"]
 }

@@ -84,6 +84,9 @@ export interface RoomState {
   userPartial: string;
   lastQuestion?: { reason: string; question: string; sourceIds: string[] };
   endReason?: string;
+  mode: "auto" | "assisted";
+  /** Assisted mode: a drafted question waiting on the investigator */
+  approval?: { id: string; reason: string; question: string; sourceIds: string[] };
 }
 
 export interface Gap {

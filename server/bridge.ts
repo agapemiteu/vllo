@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { store } from "./caseStore.js";
 import { checkAgentTranscript, checkUserTranscript, END_WORDS } from "./guardrails.js";
 import { greeting, systemPrompt } from "./prompt.js";
-import { handleTool, TOOLS } from "./tools.js";
+import { handleTool, releaseApproval, TOOLS } from "./tools.js";
 import type { RoomId } from "./types.js";
 
 const AAI_URL = "wss://agents.assemblyai.com/v1/ws";
@@ -261,6 +261,7 @@ export class RoomBridge {
       case "tool.call": {
         store.setRoom(room, { agentState: "THINKING" });
         let result: unknown;
+        const callId = ev.call_id;
         try {
           result = handleTool(room, ev.name, ev.arguments ?? {}, {
             end: (reason) => {
@@ -273,8 +274,15 @@ export class RoomBridge {
           console.error(`[${room}] tool ${ev.name} failed`, e);
           result = { error: `Tool failed: ${e.message}. Continue the interview.` };
         }
-        this.pendingResults.push({ call_id: ev.call_id, result });
-        this.flushIfIdle();
+        if (result instanceof Promise) {
+          result.then((r) => {
+            this.pendingResults.push({ call_id: callId, result: r });
+            this.flushIfIdle();
+          });
+        } else {
+          this.pendingResults.push({ call_id: callId, result });
+          this.flushIfIdle();
+        }
         break;
       }
 
@@ -282,6 +290,13 @@ export class RoomBridge {
         this.markEnded(this.ending ?? this.state.endReason ?? "declined");
         break;
     }
+  }
+
+  /** Investigator steering: context only, the agent still has to pass the question gate. */
+  direct(text: string) {
+    if (this.state.status !== "LIVE") return;
+    this.sendUp({ type: "conversation.message", role: "system", content: `Investigator direction: ${text.slice(0, 400)}. Follow it on your next question, within all conduct rules.` });
+    store.log(this.room, { kind: "system", label: "Investigator direction", detail: text.slice(0, 400), status: "done" });
   }
 
   private scheduleFinish(ms: number) {
@@ -301,6 +316,7 @@ export class RoomBridge {
 
   private markEnded(reason: string) {
     if (this.state.status === "ENDED") return;
+    releaseApproval(this.room);
     this.ready = false;
     store.setRoom(this.room, { status: "ENDED", agentState: "LISTENING", endReason: reason, endedAt: Date.now() });
     store.log(this.room, { kind: "end", label: `Interview ended · ${reason.replace(/_/g, " ")}`, status: reason === "objectives_complete" ? "done" : "warn" });
@@ -309,6 +325,7 @@ export class RoomBridge {
   }
 
   hardReset() {
+    releaseApproval(this.room);
     if (this.endTimer) clearTimeout(this.endTimer);
     if (this.state.status === "LIVE") this.sendUp({ type: "session.end" });
     const ws = this.upstream;

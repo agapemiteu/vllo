@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { insights } from "./insights.js";
 import type {
   Activity, Claim, Conflict, Gap, GuardrailEvent, Intel, Lead, Objective, Revision, RoomId, RoomState,
 } from "./types.js";
@@ -18,7 +19,7 @@ export interface TranscriptLine {
 }
 
 function freshRoom(id: RoomId): RoomState {
-  return { id, status: "IDLE", agentState: "LISTENING", caption: "", userPartial: "" };
+  return { id, status: "IDLE", agentState: "LISTENING", caption: "", userPartial: "", mode: "auto" };
 }
 
 class CaseStore extends EventEmitter {
@@ -45,7 +46,8 @@ class CaseStore extends EventEmitter {
   }
 
   reset() {
-    this.rooms = { daniel: freshRoom("daniel"), tunde: freshRoom("tunde") };
+    const modes = this.rooms ? { daniel: this.rooms.daniel.mode, tunde: this.rooms.tunde.mode } : { daniel: "auto" as const, tunde: "auto" as const };
+    this.rooms = { daniel: { ...freshRoom("daniel"), mode: modes.daniel }, tunde: { ...freshRoom("tunde"), mode: modes.tunde } };
     this.claims = [];
     this.conflicts = [];
     this.guardrails = [];
@@ -131,6 +133,7 @@ class CaseStore extends EventEmitter {
       leads: this.leads,
       intel: this.intel,
       objectives: this.objectives,
+      insights: insights(this),
       report: this.report,
     };
   }
