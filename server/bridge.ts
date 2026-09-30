@@ -3,6 +3,7 @@ import { store } from "./caseStore.js";
 import { checkAgentTranscript, checkUserTranscript, END_WORDS } from "./guardrails.js";
 import { agentFor, agentLlm } from "./agents.js";
 import { extractClaims, type Thread } from "./extractor.js";
+import { briefingFor } from "./briefing.js";
 import { greeting, systemPrompt } from "./prompt.js";
 import { AGENT_TOOLS, drainPending, handleTool, releaseApproval, type ToolCtx } from "./tools.js";
 import type { Lead, RoomId } from "./types.js";
@@ -65,7 +66,7 @@ export class RoomBridge {
     const items = drainPending(this.room);
     if (!items.length) return;
     const lines = items.map((c) => `${c.id} (${c.type}, ${c.topic}): ${c.challenge_hint}`).join(" ");
-    this.addContext(`Case update. ${lines} Raise it in the challenge phase with an open, neutral question. Never say where the information came from.`);
+    this.addContext(`Case update. ${lines} Once their account is in, raise it next: call set_next_question with one open, neutral question. Never say where the information came from.`);
   }
 
   private toolCtx(): ToolCtx {
@@ -93,7 +94,7 @@ export class RoomBridge {
       store.leads.push(lead);
       store.log(this.room, { kind: "lookup", label: `New thread · ${t.kind}`, detail: lead.text, refs: [lead.id], status: "done" });
       const researched = store.intel.filter((i) => i.room === this.room).length;
-      if ((t.kind === "place" || t.kind === "business") && researched < 3) {
+      if ((t.kind === "place" || t.kind === "business") && researched < 2) {
         handleTool(this.room, "research", { query: `${t.text} Lagos`, purpose: t.why ?? `Verify "${t.text}" from: ${quote.slice(0, 80)}` }, this.toolCtx());
       }
     }
@@ -163,6 +164,7 @@ export class RoomBridge {
         id: r.id, name: p.name, status: r.status, agentState: r.agentState, caption: r.caption,
         endReason: r.endReason, endWords: r.endReason ? END_WORDS[r.endReason] : undefined, greeting: greeting(this.room),
         scheduledAt: plan.scheduledAt, location: plan.location, checkedIn: plan.checkedIn, photo: store.photos[this.room],
+        durationSec: plan.durationSec, startedAt: r.startedAt,
         station: store.snapshot().case.station,
         serverNow: Date.now(),
       },
@@ -332,7 +334,7 @@ export class RoomBridge {
         this.ready = true;
         this.sessionId = ev.session_id;
         if (!this.resumed) {
-          const cap = Number(process.env.VLLO_MAX_SECONDS || 240) * 1000;
+          const cap = (store.plan[room].durationSec || Number(process.env.VLLO_MAX_SECONDS || 120)) * 1000;
           if (this.capTimer) clearTimeout(this.capTimer);
           this.capTimer = setTimeout(() => {
             if (this.state.status !== "LIVE" || this.ending) return;
@@ -343,7 +345,20 @@ export class RoomBridge {
           }, cap);
         }
         store.setRoom(room, { status: "LIVE", agentState: "SPEAKING" });
-        if (!this.resumed) store.log(room, { kind: "system", label: "Session live", detail: `AssemblyAI Voice Agent · ${ev.session_id}`, status: "done" });
+        if (!this.resumed) {
+          store.log(room, { kind: "system", label: "Session live", detail: `AssemblyAI Voice Agent · ${ev.session_id}`, status: "done" });
+          const brief = briefingFor(room);
+          if (brief.items.length) {
+            store.log(room, {
+              kind: "brief",
+              label: `${brief.items.length} finding${brief.items.length > 1 ? "s" : ""} carried in from ${brief.from === "daniel" ? "Daniel" : "Tunde"}'s interview`,
+              detail: brief.items.map((i) => i.console).join(" · "),
+              refs: brief.items.map((i) => i.claimId),
+              status: "done",
+            });
+            this.addContext(`Briefing from earlier interviews (sources confidential): ${brief.items.map((i) => i.agent).join(" ")} Use this in the challenge phase. Never say where it came from.`);
+          }
+        }
         else store.log(room, { kind: "system", label: "Session resumed", status: "done" });
         break;
 

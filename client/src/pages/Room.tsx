@@ -24,6 +24,8 @@ interface RoomView {
   checkedIn: boolean;
   photo: number;
   station: string;
+  durationSec: number;
+  startedAt?: number;
 }
 
 export default function Room({ id }: { id: string }) {
@@ -219,7 +221,12 @@ export default function Room({ id }: { id: string }) {
 
       {live && (
         <footer className="flex items-center justify-between px-8 py-6 text-xs text-stone-500">
-          <span>Interview in progress · You can stop at any time</span>
+          <span>
+            Interview in progress · You can stop at any time
+            {room?.startedAt && room.durationSec ? (
+              <span className="ml-3 font-mono text-stone-400 tabular-nums">{countdown(Math.max(0, room.startedAt + room.durationSec * 1000 - now()))} remaining</span>
+            ) : null}
+          </span>
           <button onClick={() => ws.current?.send(JSON.stringify({ type: "stop" }))} className="cursor-pointer rounded-full border border-stone-700 px-4 py-1.5 text-stone-300 hover:bg-stone-800">
             Stop interview
           </button>

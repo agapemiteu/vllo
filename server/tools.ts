@@ -108,7 +108,11 @@ export function releaseApproval(room: RoomId) {
 }
 
 /** Tools the voice agent sees. Claims are extracted server-side from every utterance instead. */
-export const AGENT_TOOLS = TOOLS.filter((t) => t.name !== "record_claim");
+export const AGENT_TOOLS = TOOLS.filter((t) => t.name === "set_next_question" || t.name === "end_interview").map((t) =>
+  t.name === "set_next_question"
+    ? { ...t, description: "Submit a challenge question (about a case update) before asking it. Speak it only if approved; otherwise follow the instruction and resubmit." }
+    : t,
+);
 
 export interface ToolCtx {
   end: (reason: string) => void;
@@ -383,7 +387,7 @@ export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx):
 
     case "research": {
       const mine = store.intel.filter((i) => i.room === room);
-      if (mine.length >= 5) return { status: "skipped", reason: "Research budget for this interview is used. Continue with open items." };
+      if (mine.length >= 2) return { status: "skipped", reason: "Research budget for this interview is used. Continue with open items." };
       if (!process.env.GROQ_API_KEY) return { status: "unavailable" };
       const intel: Intel = {
         id: store.nextId("W"),

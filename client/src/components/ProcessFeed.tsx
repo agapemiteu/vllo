@@ -25,6 +25,8 @@ function describe(a: Activity): { verb: string; arg: string; out?: string } {
       if (a.label.startsWith("New thread")) return { verb: "Thread", arg: a.label.replace("New thread · ", ""), out: a.detail };
       if (a.label.startsWith("New ")) return { verb: "Lead", arg: a.label.replace(/^New | lead$/g, ""), out: a.detail };
       return { verb: "OpenItems", arg: "", out: undefined };
+    case "brief":
+      return { verb: "Briefing", arg: a.label, out: a.detail };
     case "end":
       return { verb: "End", arg: after(a.label) };
     default:

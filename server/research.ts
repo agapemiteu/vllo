@@ -12,7 +12,7 @@ export interface ResearchResult {
 export async function webResearch(query: string, purpose: string): Promise<ResearchResult> {
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new Error("GROQ_API_KEY not set");
-  const model = process.env.GROQ_RESEARCH_MODEL || "openai/gpt-oss-120b";
+  const model = process.env.GROQ_RESEARCH_MODEL || "openai/gpt-oss-20b";
 
   const res = await fetch(GROQ_URL, {
     method: "POST",

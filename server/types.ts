@@ -67,7 +67,7 @@ export interface Revision {
 export interface Activity {
   id: string;
   room: RoomId;
-  kind: "heard" | "said" | "claim" | "check" | "conflict" | "resolved" | "gate" | "blocked" | "lookup" | "end" | "system";
+  kind: "heard" | "said" | "claim" | "check" | "conflict" | "resolved" | "gate" | "blocked" | "lookup" | "end" | "system" | "brief";
   label: string;
   detail?: string;
   refs?: string[];
@@ -131,4 +131,6 @@ export interface SessionPlan {
   scheduledAt?: number;
   location: string;
   checkedIn: boolean;
+  /** hard cap for the interview, drives the end countdown */
+  durationSec: number;
 }

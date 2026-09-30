@@ -14,6 +14,7 @@ import { Conflicts } from "@/components/Conflicts";
 import { Intel } from "@/components/Intel";
 import { Report } from "@/components/Report";
 import { RoomColumn } from "@/components/RoomColumn";
+import { SequenceBar } from "@/components/Sequence";
 import { Compare, Facts, Targets } from "@/components/Session";
 import { avatar, cn, mmss, pretty } from "@/lib/utils";
 import { useConsole, type RoomId, type Snapshot } from "@/lib/useConsole";
@@ -109,6 +110,8 @@ export default function Console() {
         )}
         <span className={cn("size-2 rounded-full", connected ? "bg-emerald-500" : "bg-red-500")} title={connected ? "Live" : "Reconnecting"} />
       </header>
+
+      <SequenceBar s={s} />
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(320px,1fr)_minmax(460px,1.45fr)_minmax(320px,1fr)]">
         <RoomColumn s={s} id="daniel" highlight={highlight} onRef={setHighlight} onEnd={() => send({ type: "end_room", room: "daniel" })} send={send} />

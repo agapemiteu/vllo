@@ -39,9 +39,11 @@ class CaseStore extends EventEmitter {
   report: unknown = null;
   /** Scheduling survives a case reset; interview data does not. */
   plan: Record<RoomId, SessionPlan> = {
-    daniel: { location: "Interview Room A", checkedIn: false },
-    tunde: { location: "Interview Room B", checkedIn: false },
+    daniel: { location: "Interview Room A", checkedIn: false, durationSec: 120 },
+    tunde: { location: "Interview Room B", checkedIn: false, durationSec: 120 },
   };
+  /** Back-to-back run: when the first interview ends early, the next is pulled forward to keep the handoff gap. */
+  sequence: { order: RoomId[]; gapSec: number } | null = null;
   /** photo version per person (0 = none uploaded) */
   photos: Record<RoomId, number> = { daniel: 0, tunde: 0 };
   private seq!: Record<string, number>;
@@ -142,6 +144,7 @@ class CaseStore extends EventEmitter {
       objectives: this.objectives,
       insights: insights(this),
       plan: this.plan,
+      sequence: this.sequence,
       photos: this.photos,
       report: this.report,
     };

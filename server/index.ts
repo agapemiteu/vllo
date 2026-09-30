@@ -67,6 +67,16 @@ const broadcast = () => {
 store.on("change", broadcast);
 
 setOnRoomEnded(() => {
+  // Sequence: first interview ended (early or on time) -> the next starts after the handoff gap.
+  const seq = store.sequence;
+  if (seq) {
+    const next = seq.order.find((r) => store.rooms[r].status === "IDLE");
+    const soon = Date.now() + seq.gapSec * 1000;
+    if (next && (store.plan[next].scheduledAt ?? Infinity) > soon) {
+      store.plan[next].scheduledAt = soon;
+      store.changed();
+    }
+  }
   if (ROOMS.every((r) => store.rooms[r].status === "ENDED")) {
     store.report = buildReport();
     store.changed();
@@ -113,12 +123,29 @@ server.on("upgrade", (req, socket, head) => {
           store.changed();
         }
         if (msg.type === "start_room" && bridges[room]) bridges[room].kickoff("investigator");
+        if (msg.type === "run_sequence") {
+          // One interview at a time: countdown, interview, handoff gap, next interview.
+          const order: RoomId[] = msg.first === "daniel" ? ["daniel", "tunde"] : ["tunde", "daniel"];
+          const duration = Math.min(600, Math.max(45, Number(msg.durationSec) || 120));
+          const gap = Math.min(120, Math.max(5, Number(msg.gapSec) || 20));
+          const first = Date.now() + Math.min(600, Math.max(5, Number(msg.startInSec) || 15)) * 1000;
+          store.plan[order[0]] = { ...store.plan[order[0]], durationSec: duration, scheduledAt: first };
+          store.plan[order[1]] = { ...store.plan[order[1]], durationSec: duration, scheduledAt: first + (duration + gap) * 1000 };
+          store.sequence = { order, gapSec: gap };
+          store.changed();
+        }
+        if (msg.type === "cancel_sequence") {
+          store.sequence = null;
+          for (const r of ROOMS) if (store.rooms[r].status === "IDLE") store.plan[r].scheduledAt = undefined;
+          store.changed();
+        }
         if (msg.type === "end_room" && bridges[msg.room as RoomId]) bridges[msg.room as RoomId].finish("investigator");
         if (msg.type === "reset") {
           for (const b of Object.values(bridges)) b.hardReset();
           store.reset();
           // A slot that already passed would fire again immediately after a reset.
           for (const r of ROOMS) if ((store.plan[r].scheduledAt ?? Infinity) <= Date.now()) store.plan[r].scheduledAt = undefined;
+          store.sequence = null;
         }
       });
     });

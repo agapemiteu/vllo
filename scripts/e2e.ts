@@ -5,6 +5,8 @@ import WebSocket from "ws";
 
 const room = process.argv[2] ?? "daniel";
 const host = process.argv[3] ?? "ws://localhost:8787";
+// "seq": just check in and wait for the sequence to reach this room (someone else sends run_sequence)
+const seqMode = process.argv[4] === "seq";
 const files = [1, 2, 3, 4].map((i) => new URL(`./audio/${room}${i}.wav`, import.meta.url));
 const pcm = files.map((f) => readFileSync(f).subarray(44)); // strip WAV header
 const CHUNK = 4800; // 100 ms at 24 kHz, 16-bit mono
@@ -46,9 +48,9 @@ sock.on("open", async () => {
   // Real flow: the room device checks in, the investigator schedules a slot, the scheduler kicks it off.
   sock.send(JSON.stringify({ type: "checkin" }));
   await sleep(300);
-  con.send(JSON.stringify({ type: "schedule", room, in: 5000 }));
-  console.log(ts(), "checked in, slot in 5s");
-  await silenceUntil(() => agentLines >= 1, 40000);
+  if (!seqMode) con.send(JSON.stringify({ type: "schedule", room, in: 5000 }));
+  console.log(ts(), seqMode ? "checked in, waiting for the sequence" : "checked in, slot in 5s");
+  await silenceUntil(() => agentLines >= 1, seqMode ? 420000 : 40000);
   await silenceUntil(() => false, 1500);
   for (let i = 0; i < pcm.length; i++) {
     console.log(`\n${ts()} >>> streaming line ${i + 1}`);
@@ -65,4 +67,4 @@ sock.on("open", async () => {
   console.log("guardrails:", snap.guardrails.map((g: any) => `${g.action}:${g.rule}`).join(" "));
   process.exit(0);
 });
-setTimeout(() => process.exit(1), 240000);
+setTimeout(() => process.exit(1), seqMode ? 720000 : 240000);

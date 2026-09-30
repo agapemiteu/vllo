@@ -58,8 +58,9 @@ export default function Plan() {
           </div>
         </Section>
 
-        <Section n="02" title="Schedule" sub="Set a slot, or leave it manual. The room device checks in on site; at the slot, vllo starts the interview by itself.">
-          <div className="overflow-hidden rounded-lg border bg-white">
+        <Section n="02" title="Schedule" sub="Run the interviews back to back, or set each slot yourself. The room device checks in on site; at the slot, vllo starts the interview by itself.">
+          <RunSequence s={s} send={send} />
+          <div className="mt-4 overflow-hidden rounded-lg border bg-white">
             {people.map((p, i) => (
               <ScheduleRow key={p.id} s={s} p={p} send={send} last={i === people.length - 1} />
             ))}
@@ -316,6 +317,95 @@ function ScheduleRow({ s, p, send, last }: { s: Snapshot; p: any; send: (m: unkn
 }
 
 const location_origin = () => window.location.origin;
+
+function Seg<T extends string | number>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  return (
+    <div className="flex rounded-md border bg-stone-100 p-0.5 text-[12px] font-medium">
+      {options.map(([v, l]) => (
+        <button key={String(v)} onClick={() => onChange(v)} className={cn("cursor-pointer rounded px-2.5 py-1 transition-colors", value === v ? "bg-white text-stone-900 shadow-sm" : "text-stone-500 hover:text-stone-800")}>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One interview at a time: the second is briefed with what the first established. */
+function RunSequence({ s, send }: { s: Snapshot; send: (m: unknown) => void }) {
+  const [first, setFirst] = useState<RoomId>("tunde");
+  const [startIn, setStartIn] = useState(15);
+  const [duration, setDuration] = useState(120);
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((x) => x + 1), 500);
+    return () => clearInterval(t);
+  }, []);
+  const seq = s.sequence;
+  const name = (id: RoomId) => s.case.interviewees.find((p: any) => p.id === id).name;
+  const ready = (["daniel", "tunde"] as RoomId[]).filter((r) => s.plan[r].checkedIn).length;
+  const next = seq?.order.find((r) => s.rooms[r].status !== "ENDED");
+  const nextAt = next ? s.plan[next].scheduledAt : undefined;
+  const liveRoom = seq?.order.find((r) => s.rooms[r].status === "LIVE" || s.rooms[r].status === "CONNECTING");
+
+  return (
+    <div className="rounded-lg border bg-white p-4">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+        <div>
+          <div className="text-[14px] font-semibold">Run the interviews back to back</div>
+          <p className="mt-0.5 max-w-md text-[12px] text-muted-foreground">
+            The second interview starts briefed with what the first established, without ever revealing the source.
+          </p>
+        </div>
+        <span className="flex-1" />
+        {seq ? (
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[13px] tabular-nums">
+              {liveRoom ? (
+                <span className="text-emerald-700">{name(liveRoom)} live</span>
+              ) : next && nextAt ? (
+                <span className="text-amber-700">
+                  {name(next)} {nextAt > now() ? `starts in ${Math.floor((nextAt - now()) / 60000)}:${String(Math.floor(((nextAt - now()) % 60000) / 1000)).padStart(2, "0")}` : "starting"}
+                </span>
+              ) : (
+                <span className="text-stone-500">Sequence complete</span>
+              )}
+            </span>
+            <Button size="sm" variant="outline" onClick={() => send({ type: "cancel_sequence" })}>
+              Cancel
+            </Button>
+            <a href="/console">
+              <Button size="sm">
+                Watch live <HugeiconsIcon icon={ArrowRight01Icon} size={14} />
+              </Button>
+            </a>
+          </div>
+        ) : (
+          <Button onClick={() => send({ type: "run_sequence", first, startInSec: startIn, durationSec: duration, gapSec: 20 })}>
+            <HugeiconsIcon icon={PlayIcon} size={14} /> Run sequence
+          </Button>
+        )}
+      </div>
+      {!seq && (
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 border-t pt-4 text-[12px] text-muted-foreground">
+          <label className="flex items-center gap-2">
+            First
+            <Seg value={first} options={[["tunde", name("tunde")], ["daniel", name("daniel")]]} onChange={setFirst} />
+          </label>
+          <label className="flex items-center gap-2">
+            Starts in
+            <Seg value={startIn} options={[[15, "15s"], [30, "30s"], [60, "1m"]]} onChange={setStartIn} />
+          </label>
+          <label className="flex items-center gap-2">
+            Each interview
+            <Seg value={duration} options={[[90, "1:30"], [120, "2:00"], [180, "3:00"]]} onChange={setDuration} />
+          </label>
+          <span>Handoff 20s</span>
+          <span className={cn("ml-auto", ready === 2 ? "text-emerald-700" : "text-amber-700")}>{ready}/2 room devices checked in</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function FaceSmall({ id, name }: { id: string; name: string }) {
   const photo = usePhoto(id);

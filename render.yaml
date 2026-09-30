@@ -13,7 +13,7 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
-      # gateway (Claude/GPT via AssemblyAI, needs gateway access) | groq (needs paid tier) | managed
+      # managed (default) | groq (needs paid tier) | gateway (Claude/GPT via AssemblyAI, needs gateway access)
       - key: VLLO_LLM
         value: managed
       - key: VLLO_GATEWAY_MODEL
@@ -21,6 +21,6 @@ services:
       - key: GROQ_EXTRACT_MODEL
         value: openai/gpt-oss-20b
       - key: GROQ_RESEARCH_MODEL
-        value: openai/gpt-oss-120b
+        value: openai/gpt-oss-20b
       - key: VLLO_VOICE
         value: charles

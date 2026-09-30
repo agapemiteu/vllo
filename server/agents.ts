@@ -10,16 +10,22 @@ const headers = () => ({ Authorization: process.env.ASSEMBLYAI_API_KEY!, "Conten
 
 /**
  * The voice agent's brain. VLLO_LLM:
- *  gateway (default) - AssemblyAI LLM Gateway (Claude, GPT, Gemini) billed to the AssemblyAI account
- *  groq              - Groq, needs a tier above the free 8k tokens/min
- *  managed           - AssemblyAI's built-in model, inline session config
+ *  managed (default) - AssemblyAI's built-in model, inline session config
+ *  groq              - Groq via stored agent; the free tier (8k tokens/min) rate-limits live voice turns
+ *  gateway           - AssemblyAI LLM Gateway (Claude, GPT, Gemini), needs gateway access on the account
  */
 export function agentLlm() {
-  const mode = process.env.VLLO_LLM || "gateway";
+  const mode = process.env.VLLO_LLM || "managed";
   if (mode === "gateway" && process.env.ASSEMBLYAI_API_KEY)
     return { base_url: "https://llm-gateway.assemblyai.com/v1", model: process.env.VLLO_GATEWAY_MODEL || "claude-sonnet-4-6", api_key: process.env.ASSEMBLYAI_API_KEY };
   if (mode === "groq" && process.env.GROQ_API_KEY)
-    return { base_url: "https://api.groq.com/openai/v1", model: process.env.GROQ_MODEL || "openai/gpt-oss-120b", api_key: process.env.GROQ_API_KEY };
+    return {
+      base_url: "https://api.groq.com/openai/v1",
+      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
+      api_key: process.env.GROQ_API_KEY,
+      // Reasoning tokens count against the per-minute budget and add latency.
+      ...((process.env.GROQ_MODEL || "openai/gpt-oss-120b").includes("gpt-oss") ? { reasoning_effort: "low" } : {}),
+    };
   return undefined;
 }
 
