@@ -9,10 +9,10 @@ import { useTick } from "@/components/Sequence";
 import { useConsole, type RoomId } from "@/lib/useConsole";
 
 const STEPS: [string, string][] = [
-  ["Add who you’re speaking to", "Their name, a photo, what’s already on file. You get a link to send them."],
-  ["They talk, vllo listens", "It lets them tell it their way, then asks what a good detective would: where exactly, who saw you, why then."],
-  ["Checked the moment it’s said", "“I drove my own car” is checked against the camera that caught someone else’s. Now, not next week."],
-  ["A statement you can act on", "What held up, what changed, and what still doesn’t fit. Every line quoted and timed, sent to your email."],
+  ["Add the suspect", "Name, photo, what’s already on file. You get an interview link to send them."],
+  ["vllo questions them", "It hears their side first, then asks what a good detective would: where exactly, who saw you, why then."],
+  ["Every answer checked live", "“I drove my own car” is checked against the camera that caught someone else’s. Now, not next week."],
+  ["The case report", "What held up, what changed, and what still doesn’t fit. Every line quoted and timed, sent to your email."],
 ];
 
 export default function Home() {
@@ -29,22 +29,22 @@ export default function Home() {
         {s && !full && (
           <a href="/new">
             <Button>
-              <HugeiconsIcon icon={Add01Icon} size={16} /> Take a statement
+              <HugeiconsIcon icon={Add01Icon} size={16} /> Interview a suspect
             </Button>
           </a>
         )}
       </header>
 
       <main className="mx-auto max-w-3xl px-6 pt-10 pb-20">
-        <p className="text-[13px] font-medium tracking-wide text-amber-700">For investigators, claims teams and workplace inquiries</p>
-        <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">Find the contradiction while they’re still talking.</h1>
+        <p className="text-[13px] font-medium tracking-wide text-amber-700">Voice AI for criminal investigations</p>
+        <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">An AI detective that interviews your suspects.</h1>
         <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-stone-600">
-          Today, statements get typed up after the interview and compared days later, if anyone has the time. vllo takes the statement by voice, checks each detail against your CCTV, phone records and the other statements as it’s said, and asks about the gap before they walk out.
+          Send a suspect or witness a link. vllo questions them by voice, checks every answer against your CCTV, phone records and the other statements while they’re still talking, and presses on what doesn’t add up. You get the timeline, the contradictions and the report.
         </p>
         {s && ids.length === 0 && (
           <a href="/new" className="mt-8 inline-block">
             <Button size="lg">
-              <HugeiconsIcon icon={Add01Icon} size={16} /> Take a statement
+              <HugeiconsIcon icon={Add01Icon} size={16} /> Interview a suspect
             </Button>
           </a>
         )}

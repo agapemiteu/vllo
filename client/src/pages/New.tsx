@@ -76,8 +76,8 @@ export default function New() {
       </header>
 
       <main className="mx-auto max-w-2xl px-6 pt-6 pb-24">
-        <h1 className="text-3xl font-semibold tracking-tight">Take a statement</h1>
-        <p className="mt-2 text-[15px] text-muted-foreground">Who you’re speaking to, and when.</p>
+        <h1 className="text-3xl font-semibold tracking-tight">Interview a suspect</h1>
+        <p className="mt-2 text-[15px] text-muted-foreground">Who you’re questioning, and when.</p>
 
         {s && free.length === 0 && (
           <p className="mt-8 rounded-xl border bg-stone-50 p-4 text-[14px] text-stone-600">This case already has two people registered. Reset the demo from Investigations to start over.</p>
@@ -101,7 +101,7 @@ export default function New() {
               })}
             </div>
 
-            <Step n={1} title="Person of interest">
+            <Step n={1} title="Suspect or witness">
               <div className="flex flex-col gap-4 sm:flex-row sm:gap-5">
                 <button
                   onClick={() => file.current?.click()}
