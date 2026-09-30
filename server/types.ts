@@ -135,6 +135,8 @@ export interface SessionPlan {
   durationSec: number;
   /** start this many seconds after another interview ends */
   after?: { room: RoomId; gapSec: number };
+  /** start the moment the person checks in */
+  armed?: boolean;
   /** where the investigator wants the report */
   email?: string;
 }

@@ -8,6 +8,13 @@ import { Pill, status } from "@/components/Status";
 import { useTick } from "@/components/Sequence";
 import { useConsole, type RoomId } from "@/lib/useConsole";
 
+const STEPS: [string, string][] = [
+  ["Register the person", "A name, a photo, what you already know. vllo gets a link to send them."],
+  ["vllo runs the interview", "A calm voice interviewer takes their account, follows every thread and asks for what can be verified."],
+  ["Every claim, cross-checked live", "Times, places, vehicles and companions become a timeline, checked against your evidence and every other account as they speak."],
+  ["The report, in your inbox", "Contradictions with both quotes, facts that hold, statements that changed, every line traced to who said it and when."],
+];
+
 export default function Home() {
   const { state: s, send } = useConsole();
   const [confirm, setConfirm] = useState(false);
@@ -29,32 +36,29 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-3xl px-6 pt-10 pb-20">
-        <h1 className="text-4xl font-semibold tracking-tight">Investigations</h1>
-        <p className="mt-3 max-w-xl text-[16px] leading-relaxed text-muted-foreground">
-          Register a person of interest, send them a link, and an AI voice investigator runs the interview. You watch it reason, step by step.
+        <p className="text-[13px] font-medium tracking-wide text-amber-700">AI voice investigations</p>
+        <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">Interviews that investigate themselves.</h1>
+        <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-stone-600">
+          vllo holds the conversation by voice, turns every sentence into timestamped evidence, and checks it live against your case file and every other account. You get what holds up, what breaks, and why.
         </p>
-        {s && (
-          <p className="mt-6 text-[13px] text-muted-foreground">
-            <span className="font-mono">Case {s.case.case_id}</span> · {s.case.title} · {s.case.incident.date} {s.case.incident.time}
-          </p>
+        {s && ids.length === 0 && (
+          <a href="/new" className="mt-8 inline-block">
+            <Button size="lg">
+              <HugeiconsIcon icon={Add01Icon} size={16} /> Start an investigation
+            </Button>
+          </a>
         )}
 
         {!s ? (
           <p className="mt-12 text-sm text-muted-foreground">
             <span className="shimmer-text">Connecting</span>
           </p>
-        ) : ids.length === 0 ? (
-          <div className="mt-10 rounded-2xl border border-dashed px-8 py-14 text-center">
-            <p className="text-[15px] font-medium">No one registered yet</p>
-            <p className="mt-1 text-[14px] text-muted-foreground">Start by registering the person you need to interview.</p>
-            <a href="/new" className="mt-6 inline-block">
-              <Button size="lg">
-                <HugeiconsIcon icon={Add01Icon} size={16} /> New investigation
-              </Button>
-            </a>
-          </div>
-        ) : (
-          <ul className="mt-10 divide-y rounded-2xl border">
+        ) : ids.length === 0 ? null : (
+          <>
+          <h2 className="mt-14 text-[13px] font-medium text-muted-foreground">
+            Your investigations · <span className="font-mono">Case {s.case.case_id}</span> {s.case.title}
+          </h2>
+          <ul className="mt-3 divide-y rounded-2xl border">
             {ids.map((id) => {
               const p = s.case.interviewees.find((x: any) => x.id === id);
               const st = status(s, id);
@@ -76,7 +80,21 @@ export default function Home() {
               );
             })}
           </ul>
+          </>
         )}
+
+        <ol className="mt-16 grid gap-px overflow-hidden rounded-2xl border bg-stone-200 sm:grid-cols-2">
+          {STEPS.map(([t, d], i) => (
+            <li key={t} className="bg-white p-5">
+              <span className="font-mono text-[12px] text-muted-foreground">0{i + 1}</span>
+              <div className="mt-2 text-[15px] font-semibold tracking-tight">{t}</div>
+              <p className="mt-1 text-[14px] leading-relaxed text-stone-600">{d}</p>
+            </li>
+          ))}
+        </ol>
+        <p className="mt-5 text-[13px] text-muted-foreground">
+          Never accuses. Never reveals a source. Stops the moment a lawyer is requested. vllo reports contradictions, never guilt.
+        </p>
 
         {s && ids.length > 0 && (
           <div className="mt-6 flex justify-end text-[12px] text-muted-foreground">

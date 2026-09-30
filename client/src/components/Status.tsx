@@ -23,6 +23,9 @@ export function status(s: Snapshot, id: RoomId) {
     if (left > 0) return { key: "scheduled", label: "Scheduled", tone: "amber", timer: `Starts in ${clock(left)}` };
     return { key: "due", label: plan.checkedIn ? "Starting" : "Waiting for check-in", tone: "amber", timer: plan.checkedIn ? "Starting" : "Link not opened yet" };
   }
+  if (plan.armed) {
+    return { key: "armed", label: plan.checkedIn ? "Starting" : "Ready", tone: "green", timer: `Starts when ${firstName(s, id)} checks in` };
+  }
   if (plan.after) {
     return { key: "after", label: "Queued", tone: "stone", timer: `After ${firstName(s, plan.after.room)} finishes` };
   }

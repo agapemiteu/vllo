@@ -43,6 +43,7 @@ app.post("/api/register/:id", express.json(), (req, res) => {
   plan.email = typeof b.email === "string" && /^[^\s@]+@[^\s@]+$/.test(b.email.trim()) ? b.email.trim().slice(0, 120) : undefined;
   plan.after = undefined;
   plan.scheduledAt = undefined;
+  plan.armed = b.start === "join" || b.start === "manual";
   if (b.start === "in") plan.scheduledAt = Date.now() + Math.min(3600, Math.max(5, Number(b.inSec) || 60)) * 1000;
   if (b.start === "after" && ROOMS.includes(b.afterRoom) && b.afterRoom !== id) {
     plan.after = { room: b.afterRoom, gapSec: Math.min(600, Math.max(5, Number(b.gapSec) || 60)) };
@@ -176,7 +177,14 @@ server.on("upgrade", (req, socket, head) => {
           if (msg.mode === "auto" || msg.mode === "assisted") store.setRoom(room, { mode: msg.mode });
           store.changed();
         }
-        if (msg.type === "start_room" && bridges[room]) bridges[room].kickoff("investigator");
+        if (msg.type === "start_room" && bridges[room]) {
+          // Not checked in yet: arm it, so it starts the moment they join.
+          if (store.plan[room].checkedIn) bridges[room].kickoff("investigator");
+          else {
+            store.plan[room].armed = true;
+            store.log(room, { kind: "system", label: `Starts as soon as ${store.snapshot().case.interviewees.find((p: any) => p.id === room).name.split(" ")[0]} checks in`, status: "done" });
+          }
+        }
         if (msg.type === "run_sequence") {
           // One interview at a time: countdown, interview, handoff gap, next interview.
           const order: RoomId[] = msg.first === "daniel" ? ["daniel", "tunde"] : ["tunde", "daniel"];
@@ -221,7 +229,11 @@ server.on("upgrade", (req, socket, head) => {
 setInterval(() => {
   for (const r of ROOMS) {
     const p = store.plan[r];
-    if (p.scheduledAt && p.checkedIn && Date.now() >= p.scheduledAt && store.rooms[r].status === "IDLE") bridges[r].kickoff("schedule");
+    if (store.rooms[r].status !== "IDLE" || !p.checkedIn) continue;
+    if (p.armed || (p.scheduledAt && Date.now() >= p.scheduledAt)) {
+      p.armed = false;
+      bridges[r].kickoff(p.scheduledAt ? "schedule" : "checkin");
+    }
   }
 }, 1000);
 

@@ -52,7 +52,7 @@ export default function New() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name, relation, notes, durationSec: duration, email,
-          start: start === "manual" ? "manual" : start === "after" ? "after" : "in",
+          start: start === "manual" ? "join" : start === "after" ? "after" : "in",
           inSec: start === "in60" ? 60 : 300,
           afterRoom: other, gapSec: 60,
         }),
@@ -145,13 +145,13 @@ export default function New() {
                 value={start}
                 onChange={setStart}
                 options={[
-                  ["manual", "When I start it"],
+                  ["manual", "As soon as they check in"],
                   ["in60", "In 1 minute"],
                   ["in300", "In 5 minutes"],
                   ...(other ? ([["after", `1 min after ${otherName} finishes`]] as [Start, string][]) : []),
                 ]}
               />
-              <p className="mt-2 text-[13px] text-muted-foreground">The interview starts on its own once the person has opened their link and checked in.</p>
+              <p className="mt-2 text-[13px] text-muted-foreground">You will get a link to send. The interview starts on its own once the person opens it and taps Check in.</p>
             </Step>
 
             <Step n={3} title="How long">

@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { motion, AnimatePresence } from "motion/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  AlertDiamondIcon, ArrowLeft01Icon, Mail01Icon, CheckmarkCircle02Icon, Copy01Icon, FileValidationIcon, PlayIcon, StopCircleIcon,
+  AlertDiamondIcon, ArrowLeft01Icon, ArrowUpRight01Icon, Mail01Icon, CheckmarkCircle02Icon, Copy01Icon, FileValidationIcon, PlayIcon, StopCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/Logo";
@@ -13,6 +14,14 @@ import { Pill, firstName, status } from "@/components/Status";
 import { useTick } from "@/components/Sequence";
 import { cn, pretty } from "@/lib/utils";
 import { useConsole, type RoomId, type Snapshot } from "@/lib/useConsole";
+
+function QR({ value }: { value: string }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    QRCode.toDataURL(value, { margin: 1, width: 240, color: { dark: "#1c1917", light: "#ffffff" } }).then(setSrc);
+  }, [value]);
+  return src ? <img src={src} alt="Interview link QR code" className="size-32 shrink-0 rounded-xl border bg-white p-1.5" /> : <div className="size-32 shrink-0 rounded-xl border bg-white" />;
+}
 
 /** Plain-text report for the investigator's mail app. Sending via the user's own mail client needs no mail service. */
 function mailto(s: Snapshot, id: RoomId) {
@@ -90,15 +99,15 @@ export default function Investigation({ id }: { id: RoomId }) {
           </div>
           <div className="w-full text-left sm:w-auto sm:text-right">
             <div className={cn("font-mono text-3xl font-medium tabular-nums", st.key === "live" ? "text-emerald-700" : st.key === "scheduled" ? "text-amber-700" : "text-stone-400")}>
-              {st.key === "live" || st.key === "scheduled" ? st.timer.replace("Starts in ", "").replace(" left", "") : st.key === "done" ? "Done" : "--:--"}
+              {st.key === "live" || st.key === "scheduled" ? st.timer.replace("Starts in ", "").replace(" left", "") : st.key === "done" ? "Done" : st.key === "armed" ? "Ready" : "--:--"}
             </div>
             <div className="mt-1 text-[12px] text-muted-foreground">
               {st.key === "live" ? "remaining" : st.key === "scheduled" ? "until the interview starts" : st.timer}
             </div>
             <div className="mt-3 flex gap-2 sm:justify-end">
-              {room.status === "IDLE" && (
-                <Button size="sm" disabled={!plan.checkedIn} onClick={() => send({ type: "start_room", room: id })} title={plan.checkedIn ? "" : `Waiting for ${first} to check in`}>
-                  <HugeiconsIcon icon={PlayIcon} size={13} /> Start now
+              {room.status === "IDLE" && !plan.armed && (
+                <Button size="sm" onClick={() => send({ type: "start_room", room: id })}>
+                  <HugeiconsIcon icon={PlayIcon} size={13} /> {plan.checkedIn ? "Start now" : "Start when they join"}
                 </Button>
               )}
               {st.key === "live" && (
@@ -119,9 +128,12 @@ export default function Investigation({ id }: { id: RoomId }) {
         {/* Invite */}
         {room.status === "IDLE" && (
           <section className="mt-8 rounded-2xl border bg-stone-50 p-5">
-            <div className="text-[14px] font-medium">Interview link</div>
+            <div className="flex flex-col gap-5 sm:flex-row">
+            <QR value={link} />
+            <div className="min-w-0 flex-1">
+            <div className="text-[14px] font-medium">Next: {first} opens this link</div>
             <p className="mt-0.5 text-[13px] text-muted-foreground">
-              Send this to {first}, or open it on the interview-room device. They check in there; headphones recommended.
+              Scan it with the phone {first} will use, send it, or open it here to try it yourself. Headphones recommended.
             </p>
             <div className="mt-3 flex gap-2">
               <input readOnly value={link} className="h-10 min-w-0 flex-1 rounded-lg border bg-white px-3 font-mono text-[13px] text-stone-700" onFocus={(e) => e.target.select()} />
@@ -140,6 +152,13 @@ export default function Investigation({ id }: { id: RoomId }) {
             <div className="mt-3 flex items-center gap-2 text-[13px]">
               <span className={cn("size-2 rounded-full", plan.checkedIn ? "bg-emerald-500" : "bg-stone-300")} />
               {plan.checkedIn ? `${first} has checked in` : `Waiting for ${first} to open the link`}
+            </div>
+            <a href={link} target="_blank" rel="noreferrer" className="mt-4 inline-block">
+              <Button>
+                <HugeiconsIcon icon={ArrowUpRight01Icon} size={15} /> Open interview room
+              </Button>
+            </a>
+            </div>
             </div>
           </section>
         )}

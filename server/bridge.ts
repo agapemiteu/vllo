@@ -172,13 +172,13 @@ export class RoomBridge {
   }
 
   /** Scheduled time reached, or the investigator pressed Start: the room device must be checked in (mic open). */
-  kickoff(by: "schedule" | "investigator") {
+  kickoff(by: "schedule" | "investigator" | "checkin") {
     if (this.state.status === "LIVE" || this.state.status === "CONNECTING") return;
     if (!store.plan[this.room].checkedIn || !this.browser) {
       store.log(this.room, { kind: "system", label: "Cannot start: interviewee not checked in", status: "warn" });
       return;
     }
-    store.log(this.room, { kind: "system", label: by === "schedule" ? "Scheduled time reached, starting interview" : "Investigator started the interview", status: "done" });
+    store.log(this.room, { kind: "system", label: by === "schedule" ? "Scheduled time reached, starting interview" : by === "checkin" ? "Checked in, starting interview" : "Investigator started the interview", status: "done" });
     this.sendBrowser({ type: "kickoff" });
     this.start();
   }
