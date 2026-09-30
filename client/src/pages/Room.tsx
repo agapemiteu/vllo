@@ -50,6 +50,10 @@ export default function Room({ id }: { id: string }) {
     const open = () => {
       const sock = new WebSocket(wsUrl(`/ws/room/${id}`));
       sock.binaryType = "arraybuffer";
+      // Reconnected with the mic already open (server restart or network blip): re-announce the check-in.
+      sock.onopen = () => {
+        if (mic.current) sock.send(JSON.stringify({ type: "checkin" }));
+      };
       ws.current = sock;
       sock.onmessage = (e) => {
         if (e.data instanceof ArrayBuffer) return player.current?.enqueue(e.data);
