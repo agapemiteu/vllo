@@ -11,7 +11,8 @@ Built on the **AssemblyAI Voice Agent API**.
 ## What it does
 
 - **Two concurrent Voice Agent sessions.** `/room/daniel` and `/room/tunde` each hold a live, full-duplex voice interview with turn detection and barge-in.
-- **Client-side tools drive all state.** The agent calls `record_claim` for every time, place, vehicle, companion and car handover. Claims are slot-filled with enums, so conflict detection is deterministic.
+- **Every utterance becomes structured claims.** When the interviewee pauses, the finished utterance is extracted into slot-filled claims (time, place, vehicle, companion, car handover, and corrections of earlier claims) by a fast Groq model, then normalized in code. Conflict detection is deterministic from there.
+- **The engine picks the next topic.** The agent must submit every question through `set_next_question`. Once the free account is in, an open conflict outranks everything else: the gate redirects the agent to it, with a redacted challenge hint.
 - **Cross-account conflicts.** A claim in one room can open a conflict in the other. It is delivered to the other agent as a redacted hint in its next tool result, never with names or quotes.
 - **Investigator mindset.** The agent logs lines of inquiry (`log_lead`: motive, opportunity, means, relationship) and runs background web checks (`research`) on named places and routes, via Groq's web-search models. Findings come back into the conversation without stalling it.
 - **Guardrails in code.** Every question goes through `set_next_question` first. Accusatory, leading, coercive, double or overlong questions and source leaks are blocked. A request for a lawyer, a refusal or a welfare concern ends the interview, and a server-side backstop enforces it even if the model does not. What the agent actually says is monitored too, and live corrections are pushed via `session.update`.
@@ -27,8 +28,8 @@ Built on the **AssemblyAI Voice Agent API**.
 | Client-side function tools: `tool.call` → `tool.result` after `reply.done` | `server/bridge.ts`, `server/tools.ts` |
 | Barge-in: `reply.done` with `status: "interrupted"` flushes browser playback instantly | `server/bridge.ts`, `client/src/audio/player.ts` |
 | `transcript.user` / `transcript.agent` for provenance, rights backstops and conduct monitoring | `server/bridge.ts`, `server/guardrails.ts` |
-| `conversation.message` to feed web findings and investigator direction into context | `server/bridge.ts` |
-| Custom LLM (`llm`, OpenAI-compatible) pointed at Groq, falling back to the managed model | `server/bridge.ts` |
+| `conversation.message` to deliver case updates, web findings and investigator direction into context | `server/bridge.ts` |
+| Stored agents (`POST/PUT /v1/agents`) with a custom Groq LLM, bound by `agent_id`; managed model by default | `server/agents.ts` |
 | `input.keyterms` for names and places, `session.resume` on a dropped socket | `server/bridge.ts` |
 
 The API key never leaves the server. Browsers stream PCM16 24 kHz audio to the Node bridge, which holds the authenticated upstream socket.
@@ -43,7 +44,7 @@ The API key never leaves the server. Browsers stream PCM16 24 kHz audio to the N
  │ RoomBridge(daniel) ── AssemblyAI Voice Agent session A                        │
  │ RoomBridge(tunde)  ── AssemblyAI Voice Agent session B                        │
  │ ToolRouter → CaseStore · ConflictEngine · Guardrails · Insights · Report      │
- │ research → Groq (web search), async                                           │
+ │ extractor → Groq (claims from each utterance) · research → Groq web search    │
  └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -53,14 +54,17 @@ Conflict rules, guardrails, facts, comparisons and the report are plain TypeScri
 
 ```bash
 npm install
-cp .env.example .env    # add ASSEMBLYAI_API_KEY (and GROQ_API_KEY for Groq + web research)
+cp .env.example .env    # add ASSEMBLYAI_API_KEY and GROQ_API_KEY
 npm run dev             # server :8787, client :5173
 npm run smoke           # engine test, no audio
+npx tsx scripts/e2e.ts daniel   # real-audio test: streams recorded speech into a room like a mic
 ```
 
 Open `/console` on the recording screen and `/room/daniel`, `/room/tunde` on two devices. Rooms need a microphone; use headphones so the agent's voice is not picked up as an interruption.
 
-Production: `npm run build && npm start` serves the client from the same Node process. Deploy on a host that supports long-lived WebSockets (Railway, Render, Fly).
+Production: `npm run build && npm start` serves the client from the same Node process. Deploy on a host that supports long-lived WebSockets; `render.yaml` is a ready Render blueprint.
+
+The voice agent runs on AssemblyAI's managed model by default. Set `VLLO_LLM=` (empty) to run it on Groq through stored agents; that needs a Groq tier above the free 8k tokens/minute.
 
 ## Principles
 
