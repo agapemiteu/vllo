@@ -28,6 +28,7 @@ time: 24h HH:MM if stated or clearly implied. Evening times: "half eight" = 20:3
 time_end: end of a stated duration ("for five minutes" from 21:05 = 21:10).
 quote: the speaker's exact words for that fact.
 revises_claim_id: if the speaker corrects or contradicts one of their EARLIER claims listed below on the same subject, give that claim's id.
+Follow-ups: if the utterance only adds a time or detail to an earlier claim (previous utterance "I went back to the warehouse", this one "around five past nine"), restate that full claim with the new time and set revises_claim_id to it.
 One claim per fact. Never invent facts. Output JSON only.`;
 
 export interface Thread {
@@ -36,7 +37,7 @@ export interface Thread {
   why?: string;
 }
 
-export async function extractClaims(room: RoomId, utterance: string, lastQuestion?: string) {
+export async function extractClaims(room: RoomId, utterance: string, lastQuestion?: string, previous?: string) {
   const key = process.env.GROQ_API_KEY;
   if (!key) return { claims: [], threads: [] as Thread[] };
   const earlier = store.claims
@@ -73,7 +74,7 @@ export async function extractClaims(room: RoomId, utterance: string, lastQuestio
         { role: "system", content: SYSTEM },
         {
           role: "user",
-          content: `Speaker: ${room}\nInterviewer's last question: ${lastQuestion ?? "(opening: describe Monday evening from 8pm)"}\nSpeaker's earlier claims:\n${earlier || "(none)"}\n\nUtterance: "${utterance}"`,
+          content: `Speaker: ${room}\nInterviewer's last question: ${lastQuestion ?? "(opening: describe Monday evening from 8pm)"}\nSpeaker's previous utterance: ${previous ? `"${previous}"` : "(none)"}\nSpeaker's earlier claims:\n${earlier || "(none)"}\n\nUtterance: "${utterance}"`,
         },
       ],
     }),

@@ -65,7 +65,7 @@ export class RoomBridge {
     const items = drainPending(this.room);
     if (!items.length) return;
     const lines = items.map((c) => `${c.id} (${c.type}, ${c.topic}): ${c.challenge_hint}`).join(" ");
-    this.sendUp({ type: "conversation.message", role: "system", content: `Case update. ${lines} Raise it in the challenge phase with an open, neutral question. Never say where the information came from.` });
+    this.addContext(`Case update. ${lines} Raise it in the challenge phase with an open, neutral question. Never say where the information came from.`);
   }
 
   private toolCtx(): ToolCtx {
@@ -74,7 +74,7 @@ export class RoomBridge {
         this.ending = this.trigger ?? reason;
         this.scheduleFinish(9000);
       },
-      inject: (text) => this.sendUp({ type: "conversation.message", role: "system", content: text }),
+      inject: (text) => this.addContext(text),
     };
   }
 
@@ -98,19 +98,19 @@ export class RoomBridge {
       }
     }
     const top = fresh[0];
-    this.sendUp({
-      type: "conversation.message",
-      role: "system",
-      content: `New thread to pull: ${top.text} (${top.kind}). When it fits, ask for specifics that can be independently verified: names, exact place, times, receipts, who else can confirm.`,
-    });
+    this.addContext(`New thread to pull: ${top.text} (${top.kind}). When it fits, ask for specifics that can be independently verified: names, exact place, times, receipts, who else can confirm.`);
   }
 
   /** Server-side claim extraction, serialised per room so revisions see earlier claims. */
+  private lastHeard = "";
+
   private extract(text: string) {
     const lastQ = this.state.lastQuestion?.question ?? this.lastAgentText;
+    const previous = this.lastHeard;
+    this.lastHeard = text;
     this.extracting = this.extracting.then(async () => {
       try {
-        const { claims, threads } = await extractClaims(this.room, text, lastQ);
+        const { claims, threads } = await extractClaims(this.room, text, lastQ, previous);
         for (const c of claims) handleTool(this.room, "record_claim", c, this.toolCtx());
         this.openThreads(threads, text);
       } catch (e: any) {
@@ -189,6 +189,8 @@ export class RoomBridge {
     }
     this.ending = null;
     this.trigger = null;
+    this.contextQueue = [];
+    this.lastHeard = "";
     this.resumed = false;
     this.flagged = false;
     this.prompt = systemPrompt(this.room);
@@ -272,6 +274,23 @@ export class RoomBridge {
   }
 
   private holdTimer: NodeJS.Timeout | null = null;
+  private contextQueue: string[] = [];
+
+  /**
+   * System context for the agent. Injecting mid-reply empties that reply, so it is queued
+   * and delivered only between turns (after reply.done, while nobody is speaking).
+   */
+  private addContext(text: string) {
+    this.contextQueue.push(text);
+    this.flushContext();
+  }
+
+  private flushContext() {
+    if (!this.ready || this.lastEvent !== "reply.done" || this.pendingResults.length || !this.contextQueue.length) return;
+    const content = this.contextQueue.splice(0).join("\n\n");
+    upstreamLog[this.room].push(`-> context (${content.length} chars)`);
+    this.sendUp({ type: "conversation.message", role: "system", content });
+  }
 
   private flushIfIdle(force = false) {
     if (!this.pendingResults.length) return;
@@ -413,6 +432,7 @@ export class RoomBridge {
           store.setRoom(room, { agentState: "LISTENING" });
         } else {
           this.flushIfIdle();
+          this.flushContext();
           store.setRoom(room, { agentState: "LISTENING" });
           if (this.ending && !this.pendingResults.length && !String(ev.reply_id ?? "").startsWith("fc-")) {
             this.scheduleFinish(1800);
@@ -451,7 +471,7 @@ export class RoomBridge {
   /** Investigator steering: context only, the agent still has to pass the question gate. */
   direct(text: string) {
     if (this.state.status !== "LIVE") return;
-    this.sendUp({ type: "conversation.message", role: "system", content: `Investigator direction: ${text.slice(0, 400)}. Follow it on your next question, within all conduct rules.` });
+    this.addContext(`Investigator direction: ${text.slice(0, 400)}. Follow it on your next question, within all conduct rules.`);
     store.log(this.room, { kind: "system", label: "Investigator direction", detail: text.slice(0, 400), status: "done" });
   }
 

@@ -209,6 +209,11 @@ export function handleTool(room: RoomId, name: string, args: any, ctx: ToolCtx):
       const rawVal = String(args.value ?? "").trim().toLowerCase();
       if (["lent_to_daniel", "returned_by_daniel", "not_lent"].includes(rawVal.replace(/[\s-]+/g, "_"))) subject = "car_handover";
       if (subject === "other" && ["daniel", "tunde", "none", "alone"].includes(rawVal)) subject = "companion";
+      // Where a car was kept ("mine was at the mechanic") is a detail, not which vehicle they drove.
+      if (subject === "vehicle" && /mechanic|garage|workshop|repair/i.test(`${rawVal} ${args.quote ?? ""}`)) {
+        subject = "other";
+        args = { ...args, value: String(args.value), revises_claim_id: undefined };
+      }
       if (subject === "other" && /\bwith (him|daniel|tunde)\b/i.test(String(args.quote ?? ""))) {
         subject = "companion";
         args = { ...args, value: room === "tunde" ? "daniel" : "tunde" };
