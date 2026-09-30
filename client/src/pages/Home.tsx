@@ -11,7 +11,7 @@ import { useConsole, type RoomId } from "@/lib/useConsole";
 const STEPS: [string, string][] = [
   ["Add the suspect", "Name, photo, what’s already on file. You get an interview link to send them."],
   ["vllo questions them", "It hears their side first, then asks what a good detective would: where exactly, who saw you, why then."],
-  ["Every answer checked live", "“I drove my own car” is checked against the camera that caught someone else’s. Now, not next week."],
+  ["Every answer checked live", "Each answer becomes a timestamped claim, checked against your evidence and other statements while they’re still talking."],
   ["The case report", "What held up, what changed, and what still doesn’t fit. Every line quoted and timed, sent to your email."],
 ];
 
@@ -39,7 +39,7 @@ export default function Home() {
         <p className="text-[13px] font-medium tracking-wide text-amber-700">Voice AI for criminal investigations</p>
         <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">An AI detective that interviews your suspects.</h1>
         <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-stone-600">
-          Send a suspect or witness a link. vllo questions them by voice, checks every answer against your CCTV, phone records and the other statements while they’re still talking, and presses on what doesn’t add up. You get the timeline, the contradictions and the report.
+          vllo interviews suspects and witnesses by voice. It questions them, cross-checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report.
         </p>
         {s && ids.length === 0 && (
           <a href="/new" className="mt-8 inline-block">

@@ -1,23 +1,19 @@
 # vllo
 
-**Voice AI for criminal investigations.** An AI detective that interviews your suspects by voice, checks every answer against the evidence while they are still talking, and gives you the contradictions and a report.
+vllo is an AI detective that interviews suspects and witnesses by voice. It questions them, cross-checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report.
 
 - Live app: https://vllo.vercel.app
 - Backend: https://vllo.onrender.com
 - Built for the AssemblyAI Voice Agent Hackathon
 
-## The problem
-
-Statements are taken, typed up, and compared days later, if anyone has the time. By then the person has left, and the question that would have cleared up the gap never got asked.
-
 ## What vllo does
 
-1. You register the person: name, photo, what is already on file.
-2. You send them a link (or they scan a QR code on the interview device).
-3. They check in, and vllo interviews them by voice.
-4. Every answer becomes a claim with a time and a quote, and is checked against the case evidence (CCTV, phone records, vehicle registry) and against anyone else interviewed.
-5. When something does not add up, vllo asks about it, neutrally, without revealing where the information came from.
-6. When it ends, you get a report: what held up, what changed, what still does not fit, every line quoted and timed.
+- **Interviews by voice.** A natural spoken conversation: the person gives their account, then vllo asks follow-up questions to pin down times, places, people and reasons.
+- **Runs without anyone in the room.** Share a link; the interview starts when the person checks in, at a scheduled time, or after another interview ends.
+- **Checks answers as they are given.** Every answer becomes a claim with a timestamp and the person's own words, checked in real time against the case evidence and other statements.
+- **Follows up on contradictions.** Conflicts are raised with open, neutral questions, without revealing where the information came from.
+- **Shows its reasoning live.** The investigator sees what vllo heard, what it checked, what conflicts, and why it is asking each question.
+- **Delivers a report.** What was established, what changed, what still conflicts, every point traced to who said it and when. Can be emailed to the investigator.
 
 ## How to use it
 
@@ -30,7 +26,7 @@ Statements are taken, typed up, and compared days later, if anyone has the time.
 7. Watch the investigation page: what vllo hears, what it checks, contradictions as they appear, and the question it is asking and why.
 8. When it ends, click **View full report** or **Email report**.
 
-Try saying things that clash with the evidence, for example "I took an Uber home" or "I was alone all evening", and watch the contradiction appear.
+The demo includes one sample case with evidence on file. Answer in your own words; when an answer conflicts with the evidence, the contradiction appears on the investigation page and vllo asks about it.
 
 ## Fallbacks and known limits
 
