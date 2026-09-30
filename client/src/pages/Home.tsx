@@ -39,8 +39,16 @@ export default function Home() {
         <p className="text-[13px] font-medium tracking-wide text-amber-700">Voice AI for investigations and verification</p>
         <h1 className="mt-3 text-[40px] leading-[1.05] font-semibold tracking-tight sm:text-5xl">An AI detective that interviews suspects and witnesses.</h1>
         <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-stone-600">
-          vllo interviews people by voice, checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report. Built for investigators, HR, legal and compliance teams.
+          vllo interviews people by voice, checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report.
         </p>
+        <div className="mt-6 flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-[14px] font-medium text-stone-500">Built for</span>
+          {["Investigators", "HR teams", "Legal teams", "Compliance", "Insurers"].map((t) => (
+            <span key={t} className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[14px] font-medium text-amber-900">
+              {t}
+            </span>
+          ))}
+        </div>
         {s && (
           <a href="/new" className="mt-8 inline-block">
             <Button size="lg">
