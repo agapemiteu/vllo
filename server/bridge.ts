@@ -2,10 +2,10 @@ import WebSocket from "ws";
 import { store } from "./caseStore.js";
 import { checkAgentTranscript, checkUserTranscript, END_WORDS } from "./guardrails.js";
 import { agentFor, groqLlm } from "./agents.js";
-import { extractClaims } from "./extractor.js";
+import { extractClaims, type Thread } from "./extractor.js";
 import { greeting, systemPrompt } from "./prompt.js";
 import { AGENT_TOOLS, drainPending, handleTool, releaseApproval, type ToolCtx } from "./tools.js";
-import type { RoomId } from "./types.js";
+import type { Lead, RoomId } from "./types.js";
 
 const AAI_URL = "wss://agents.assemblyai.com/v1/ws";
 const REMINDER = "\n\nReminder: never accuse, never reveal sources or name other interviewees, never pressure.";
@@ -75,13 +75,41 @@ export class RoomBridge {
     };
   }
 
+  /** New specifics become leads; places and businesses get checked on the web; the best one goes to the agent to pursue. */
+  private openThreads(threads: Thread[], quote: string) {
+    if (this.ending || this.trigger || this.state.status !== "LIVE") return;
+    const key = (x: string) => x.toLowerCase().replace(/^(the|a|an|his|her|my)\s+/, "").split(/[\s:]+/).slice(0, 2).join(" ");
+    const fresh = threads.filter((t) => !store.leads.some((l) => l.room === this.room && key(l.text) === key(t.text)));
+    if (!fresh.length) return;
+    const KIND: Record<string, Lead["kind"]> = { person: "relationship", place: "opportunity", business: "lead", object: "means", reason: "motive" };
+    for (const t of fresh) {
+      const lead: Lead = {
+        id: store.nextId("L"), room: this.room, kind: KIND[t.kind] ?? "lead", thread: t.kind,
+        text: `${t.text}${t.why ? `: ${t.why}` : ""}`.slice(0, 240), sourceIds: [], at: store.clock(this.room),
+      };
+      store.leads.push(lead);
+      store.log(this.room, { kind: "lookup", label: `New thread · ${t.kind}`, detail: lead.text, refs: [lead.id], status: "done" });
+      const researched = store.intel.filter((i) => i.room === this.room).length;
+      if ((t.kind === "place" || t.kind === "business") && researched < 3) {
+        handleTool(this.room, "research", { query: `${t.text} Lagos`, purpose: t.why ?? `Verify "${t.text}" from: ${quote.slice(0, 80)}` }, this.toolCtx());
+      }
+    }
+    const top = fresh[0];
+    this.sendUp({
+      type: "conversation.message",
+      role: "system",
+      content: `New thread to pull: ${top.text} (${top.kind}). When it fits, ask for specifics that can be independently verified: names, exact place, times, receipts, who else can confirm.`,
+    });
+  }
+
   /** Server-side claim extraction, serialised per room so revisions see earlier claims. */
   private extract(text: string) {
     const lastQ = this.state.lastQuestion?.question ?? this.lastAgentText;
     this.extracting = this.extracting.then(async () => {
       try {
-        const claims = await extractClaims(this.room, text, lastQ);
+        const { claims, threads } = await extractClaims(this.room, text, lastQ);
         for (const c of claims) handleTool(this.room, "record_claim", c, this.toolCtx());
+        this.openThreads(threads, text);
       } catch (e: any) {
         console.error(`[${this.room}] extraction failed`, e.message);
         store.log(this.room, { kind: "system", label: "Claim extraction failed", detail: String(e.message).slice(0, 140), status: "error" });
@@ -101,10 +129,19 @@ export class RoomBridge {
       let msg: any;
       try { msg = JSON.parse(String(data)); } catch { return; }
       if (msg.type === "start") this.start();
+      if (msg.type === "checkin") {
+        store.plan[this.room].checkedIn = true;
+        store.log(this.room, { kind: "system", label: "Checked in", detail: `${store.plan[this.room].location} · microphone ready`, status: "done" });
+      }
       if (msg.type === "stop") this.finish("declined");
     });
     ws.on("close", () => {
-      if (this.browser === ws) this.browser = null;
+      if (this.browser !== ws) return;
+      this.browser = null;
+      if (store.plan[this.room].checkedIn && this.state.status !== "LIVE") {
+        store.plan[this.room].checkedIn = false;
+        store.changed();
+      }
     });
     this.pushRoomState();
   }
@@ -116,10 +153,28 @@ export class RoomBridge {
   pushRoomState() {
     const r = this.state;
     const p = store.snapshot().case.interviewees.find((x: any) => x.id === this.room);
+    const plan = store.plan[this.room];
     this.sendBrowser({
       type: "room",
-      room: { id: r.id, name: p.name, status: r.status, agentState: r.agentState, caption: r.caption, endReason: r.endReason, endWords: r.endReason ? END_WORDS[r.endReason] : undefined, greeting: greeting(this.room) },
+      room: {
+        id: r.id, name: p.name, status: r.status, agentState: r.agentState, caption: r.caption,
+        endReason: r.endReason, endWords: r.endReason ? END_WORDS[r.endReason] : undefined, greeting: greeting(this.room),
+        scheduledAt: plan.scheduledAt, location: plan.location, checkedIn: plan.checkedIn, photo: store.photos[this.room],
+        station: store.snapshot().case.station,
+      },
     });
+  }
+
+  /** Scheduled time reached, or the investigator pressed Start: the room device must be checked in (mic open). */
+  kickoff(by: "schedule" | "investigator") {
+    if (this.state.status === "LIVE" || this.state.status === "CONNECTING") return;
+    if (!store.plan[this.room].checkedIn || !this.browser) {
+      store.log(this.room, { kind: "system", label: "Cannot start: interviewee not checked in", status: "warn" });
+      return;
+    }
+    store.log(this.room, { kind: "system", label: by === "schedule" ? "Scheduled time reached, starting interview" : "Investigator started the interview", status: "done" });
+    this.sendBrowser({ type: "kickoff" });
+    this.start();
   }
 
   start() {

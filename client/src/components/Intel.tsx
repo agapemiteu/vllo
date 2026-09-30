@@ -34,7 +34,7 @@ export function Intel({ s }: { s: Snapshot }) {
                 <>
                   <div className="flex items-center gap-1.5">
                     <HugeiconsIcon icon={Idea01Icon} size={12} className="text-stone-500" />
-                    <span className={cn("rounded px-1.5 text-[10px] font-medium capitalize", KIND_TONE[it.l.kind])}>{it.l.kind}</span>
+                    <span className={cn("rounded px-1.5 text-[10px] font-medium capitalize", KIND_TONE[it.l.kind])}>{it.l.thread ? `thread · ${it.l.thread}` : it.l.kind}</span>
                     <span className="font-mono text-[10px] text-muted-foreground">{it.id}</span>
                   </div>
                   <p className="mt-1 text-[12px] leading-relaxed text-stone-700">{it.l.text}</p>

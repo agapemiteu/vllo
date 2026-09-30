@@ -22,6 +22,7 @@ function describe(a: Activity): { verb: string; arg: string; out?: string } {
       return { verb: "Guardrail", arg: `blocked ${after(a.label)}`, out: a.detail };
     case "lookup":
       if (a.label.toLowerCase().includes("web") || a.label.toLowerCase().includes("search")) return { verb: "WebSearch", arg: a.status === "running" ? a.detail ?? "" : a.refs?.[0] ?? "", out: a.status === "running" ? undefined : a.detail };
+      if (a.label.startsWith("New thread")) return { verb: "Thread", arg: a.label.replace("New thread · ", ""), out: a.detail };
       if (a.label.startsWith("New ")) return { verb: "Lead", arg: a.label.replace(/^New | lead$/g, ""), out: a.detail };
       return { verb: "OpenItems", arg: "", out: undefined };
     case "end":

@@ -3,6 +3,7 @@ import type {
   Activity, Claim, Conflict, Gap, GuardrailEvent, Intel, Lead, Objective, Revision, RoomId, RoomState,
 } from "../../../server/types";
 import { wsUrl } from "./utils";
+import { setPhotoVersions } from "@/components/Face";
 
 export type { Activity, Claim, Conflict, Gap, GuardrailEvent, Intel, Lead, Objective, Revision, RoomId, RoomState };
 
@@ -26,6 +27,8 @@ export interface Snapshot {
     metrics: { claims: number; facts: number; conflicts: number; resolved: number; questions: number; blocked: number; breaches: number; research: number; coverage: { daniel: number; tunde: number } };
   };
   report: any;
+  plan: Record<RoomId, { scheduledAt?: number; location: string; checkedIn: boolean }>;
+  photos: Record<RoomId, number>;
 }
 
 export function useConsole() {
@@ -42,7 +45,10 @@ export function useConsole() {
       sock.onopen = () => setConnected(true);
       sock.onmessage = (e) => {
         const msg = JSON.parse(e.data);
-        if (msg.type === "snapshot") setState(msg.state);
+        if (msg.type === "snapshot") {
+          setPhotoVersions(msg.state.photos ?? {});
+          setState(msg.state);
+        }
       };
       sock.onclose = () => {
         setConnected(false);

@@ -5,7 +5,10 @@ import { HeadphonesIcon, Mic01Icon, StopCircleIcon } from "@hugeicons/core-free-
 import { Button } from "@/components/ui/button";
 import { startMic, type Mic } from "@/audio/mic";
 import { Player } from "@/audio/player";
-import { cn, wsUrl } from "@/lib/utils";
+import { avatar, cn, wsUrl } from "@/lib/utils";
+import { setPhotoVersions, usePhoto } from "@/components/Face";
+
+const countdown = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
 import { Logo } from "@/components/Logo";
 
 interface RoomView {
@@ -16,12 +19,24 @@ interface RoomView {
   caption: string;
   endWords?: string;
   greeting: string;
+  scheduledAt?: number;
+  location: string;
+  checkedIn: boolean;
+  photo: number;
+  station: string;
 }
 
 export default function Room({ id }: { id: string }) {
   const [room, setRoom] = useState<RoomView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [checkedHere, setCheckedHere] = useState(false);
+  const [, tick] = useState(0);
+  const photo = usePhoto(id);
+  useEffect(() => {
+    const t = setInterval(() => tick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
   const ws = useRef<WebSocket | null>(null);
   const player = useRef<Player | null>(null);
   const mic = useRef<Mic | null>(null);
@@ -37,7 +52,10 @@ export default function Room({ id }: { id: string }) {
       sock.onmessage = (e) => {
         if (e.data instanceof ArrayBuffer) return player.current?.enqueue(e.data);
         const msg = JSON.parse(e.data);
-        if (msg.type === "room") setRoom(msg.room);
+        if (msg.type === "room") {
+          setPhotoVersions({ [id]: msg.room.photo });
+          setRoom(msg.room);
+        }
         if (msg.type === "flush") player.current?.flush();
         if (msg.type === "ended") {
           mic.current?.stop();
@@ -73,15 +91,17 @@ export default function Room({ id }: { id: string }) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  async function begin() {
+  /** Check-in unlocks audio and the microphone; the interview itself starts at the slot or when the investigator starts it. */
+  async function checkIn() {
     setError(null);
     try {
       player.current ??= new Player();
       await player.current.resume();
-      mic.current = await startMic((buf) => {
+      mic.current ??= await startMic((buf) => {
         if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(buf);
       });
-      ws.current?.send(JSON.stringify({ type: "start" }));
+      ws.current?.send(JSON.stringify({ type: "checkin" }));
+      setCheckedHere(true);
     } catch (e: any) {
       setError(e?.name === "NotAllowedError" ? "Microphone access is needed to take part." : String(e?.message ?? e));
     }
@@ -101,19 +121,41 @@ export default function Room({ id }: { id: string }) {
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center px-6 pb-16 text-center">
         <AnimatePresence mode="wait">
           {!live && status !== "ENDED" && (
-            <motion.div key="idle" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="flex flex-col items-center">
-              <p className="mb-3 text-xs uppercase tracking-[0.2em] text-stone-500">Interview</p>
+            <motion.div key={checkedHere && room?.checkedIn ? "wait" : "idle"} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="flex flex-col items-center">
+              <img src={photo ?? avatar(room?.name ?? id)} alt="" className="size-28 rounded-2xl border border-stone-800 bg-stone-800 object-cover" />
+              <p className="mt-6 mb-2 text-xs tracking-[0.2em] text-stone-500 uppercase">Interview</p>
               <h1 className="text-4xl font-semibold tracking-tight">{room?.name ?? "…"}</h1>
-              <p className="mt-8 max-w-lg text-[15px] leading-relaxed text-stone-400">
-                You are about to speak with an AI interviewer. You don't have to answer any question, you can stop at any time, and you can ask for a lawyer.
+              <p className="mt-3 font-mono text-[12px] text-stone-500">
+                {room?.location}
+                {room?.scheduledAt ? ` · ${new Date(room.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
               </p>
-              <div className="mt-6 flex items-center gap-2 text-xs text-stone-500">
-                <HugeiconsIcon icon={HeadphonesIcon} size={14} /> Please use headphones
-              </div>
-              <Button size="lg" onClick={begin} className="mt-10 rounded-full bg-stone-100 px-8 text-stone-900 hover:bg-white">
-                <HugeiconsIcon icon={Mic01Icon} size={18} /> Begin interview
-              </Button>
-              {status === "DISCONNECTED" && <p className="mt-4 text-sm text-amber-400">The connection was lost. You can begin again.</p>}
+
+              {checkedHere && room?.checkedIn ? (
+                <>
+                  <div className="mt-10 flex items-center gap-2 text-sm text-emerald-400">
+                    <span className="size-2 animate-pulse rounded-full bg-emerald-400" /> Checked in · microphone ready
+                  </div>
+                  <p className="mt-4 text-2xl font-medium text-stone-100 tabular-nums">
+                    {room.scheduledAt && room.scheduledAt > Date.now() ? `Your interview begins in ${countdown(room.scheduledAt - Date.now())}` : "Your interview will begin shortly"}
+                  </p>
+                  <p className="mt-3 max-w-md text-[14px] leading-relaxed text-stone-500">
+                    Please keep your headphones on. You don't have to answer any question, you can stop at any time, and you can ask for a lawyer.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-8 max-w-lg text-[15px] leading-relaxed text-stone-400">
+                    You are about to speak with an AI interviewer. You don't have to answer any question, you can stop at any time, and you can ask for a lawyer.
+                  </p>
+                  <div className="mt-6 flex items-center gap-2 text-xs text-stone-500">
+                    <HugeiconsIcon icon={HeadphonesIcon} size={14} /> Please use headphones
+                  </div>
+                  <Button size="lg" onClick={checkIn} className="mt-10 rounded-full bg-stone-100 px-8 text-stone-900 hover:bg-white">
+                    <HugeiconsIcon icon={Mic01Icon} size={18} /> Check in
+                  </Button>
+                </>
+              )}
+              {status === "DISCONNECTED" && <p className="mt-4 text-sm text-amber-400">The connection was lost. The investigator can restart the session.</p>}
               {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
             </motion.div>
           )}

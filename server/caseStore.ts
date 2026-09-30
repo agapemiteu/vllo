@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { insights } from "./insights.js";
 import type {
-  Activity, Claim, Conflict, Gap, GuardrailEvent, Intel, Lead, Objective, Revision, RoomId, RoomState,
+  Activity, Claim, Conflict, Gap, GuardrailEvent, Intel, Lead, Objective, Revision, RoomId, RoomState, SessionPlan,
 } from "./types.js";
 
 export const CASE = JSON.parse(
@@ -37,6 +37,13 @@ class CaseStore extends EventEmitter {
   /** conflict ids waiting to be delivered to a room's next tool result */
   pending!: Record<RoomId, string[]>;
   report: unknown = null;
+  /** Scheduling survives a case reset; interview data does not. */
+  plan: Record<RoomId, SessionPlan> = {
+    daniel: { location: "Interview Room A", checkedIn: false },
+    tunde: { location: "Interview Room B", checkedIn: false },
+  };
+  /** photo version per person (0 = none uploaded) */
+  photos: Record<RoomId, number> = { daniel: 0, tunde: 0 };
   private seq!: Record<string, number>;
   private timer: NodeJS.Timeout | null = null;
 
@@ -134,6 +141,8 @@ class CaseStore extends EventEmitter {
       intel: this.intel,
       objectives: this.objectives,
       insights: insights(this),
+      plan: this.plan,
+      photos: this.photos,
       report: this.report,
     };
   }

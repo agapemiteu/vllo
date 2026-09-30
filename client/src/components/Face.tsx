@@ -1,48 +1,54 @@
 import { useEffect, useState } from "react";
 import { avatar, cn } from "@/lib/utils";
 
-const key = (id: string) => `vllo-photo-${id}`;
+/** Photo versions come from the server snapshot; 0 means no photo on file. */
+let versions: Record<string, number> = {};
 
-function read(id: string) {
-  try {
-    return localStorage.getItem(key(id));
-  } catch {
-    return null;
-  }
-}
-
-export function setPhoto(id: string, dataUrl: string | null) {
-  try {
-    if (dataUrl) localStorage.setItem(key(id), dataUrl);
-    else localStorage.removeItem(key(id));
-  } catch {
-    /* storage full or blocked */
-  }
+export function setPhotoVersions(v: Record<string, number>) {
+  if (Object.entries(v).every(([k, n]) => versions[k] === n)) return;
+  versions = { ...versions, ...v };
   window.dispatchEvent(new CustomEvent("vllo-photo"));
 }
 
+export function photoUrl(id: string) {
+  const v = versions[id];
+  return v ? `/api/photo/${id}?v=${v}` : null;
+}
+
 export function usePhoto(id: string) {
-  const [src, setSrc] = useState(() => read(id));
+  const [src, setSrc] = useState(() => photoUrl(id));
   useEffect(() => {
-    const on = () => setSrc(read(id));
+    const on = () => setSrc(photoUrl(id));
+    on();
     window.addEventListener("vllo-photo", on);
-    window.addEventListener("storage", on);
-    return () => {
-      window.removeEventListener("vllo-photo", on);
-      window.removeEventListener("storage", on);
-    };
+    return () => window.removeEventListener("vllo-photo", on);
   }, [id]);
   return src;
 }
 
-/** Interviewee face: uploaded photo if the investigator added one, otherwise a neutral illustrated avatar. */
-export function Face({ id, name, className }: { id: string; name: string; className?: string }) {
-  const photo = usePhoto(id);
-  return <img src={photo ?? avatar(name)} alt={name} className={cn("rounded-full border bg-stone-200 object-cover", className)} />;
+export async function uploadPhoto(id: string, file: File) {
+  const dataUrl = await fileToDataUrl(file);
+  await fetch(`/api/photo/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl }) });
 }
 
-/** Downscale an uploaded image so it fits comfortably in localStorage. */
-export function fileToDataUrl(file: File, size = 256): Promise<string> {
+export async function removePhoto(id: string) {
+  await fetch(`/api/photo/${id}`, { method: "DELETE" });
+}
+
+/** Person of interest: the photo on file, otherwise a neutral illustrated placeholder. */
+export function Face({ id, name, className, square }: { id: string; name: string; className?: string; square?: boolean }) {
+  const photo = usePhoto(id);
+  return (
+    <img
+      src={photo ?? avatar(name)}
+      alt={name}
+      className={cn("border bg-stone-200 object-cover", square ? "rounded-lg" : "rounded-full", className)}
+    />
+  );
+}
+
+/** Centre-crop and downscale so uploads stay small. */
+export function fileToDataUrl(file: File, size = 320): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -51,7 +57,7 @@ export function fileToDataUrl(file: File, size = 256): Promise<string> {
       c.width = c.height = size;
       c.getContext("2d")!.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
       URL.revokeObjectURL(img.src);
-      resolve(c.toDataURL("image/jpeg", 0.85));
+      resolve(c.toDataURL("image/jpeg", 0.86));
     };
     img.onerror = reject;
     img.src = URL.createObjectURL(file);

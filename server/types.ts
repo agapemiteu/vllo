@@ -102,6 +102,8 @@ export interface Lead {
   id: string;
   room: RoomId;
   kind: "motive" | "opportunity" | "means" | "relationship" | "lead";
+  /** set when the lead was opened automatically from something the interviewee said */
+  thread?: "person" | "place" | "business" | "object" | "reason";
   text: string;
   sourceIds: string[];
   at: number;
@@ -122,4 +124,11 @@ export interface Objective {
   id: string;
   text: string;
   resolved: boolean;
+}
+
+export interface SessionPlan {
+  /** epoch ms; undefined = investigator starts it manually */
+  scheduledAt?: number;
+  location: string;
+  checkedIn: boolean;
 }

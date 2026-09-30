@@ -43,7 +43,11 @@ async function silenceUntil(pred: () => boolean, maxMs: number) {
 }
 
 sock.on("open", async () => {
-  sock.send(JSON.stringify({ type: "start" }));
+  // Real flow: the room device checks in, the investigator schedules a slot, the scheduler kicks it off.
+  sock.send(JSON.stringify({ type: "checkin" }));
+  await sleep(300);
+  con.send(JSON.stringify({ type: "schedule", room, at: Date.now() + 5000 }));
+  console.log(ts(), "checked in, slot in 5s");
   await silenceUntil(() => agentLines >= 1, 40000);
   await silenceUntil(() => false, 1500);
   for (let i = 0; i < pcm.length; i++) {

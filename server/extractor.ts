@@ -9,7 +9,10 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const SYSTEM = `You extract factual claims from one utterance in an investigative interview about Monday evening (20:00-22:00) around a warehouse break-in on Admiralty Way, Lekki. People: daniel (former warehouse night staff), tunde (Daniel's friend, owns a grey Toyota Corolla).
 
-Return JSON: {"claims":[{"subject","about","value","time","time_end","quote","revises_claim_id"}]}. Return {"claims":[]} if the utterance states no fact.
+Return JSON: {"claims":[{"subject","about","value","time","time_end","quote","revises_claim_id"}], "threads":[{"kind","text","why"}]}. Use empty arrays when there is nothing.
+
+threads: at most ONE new, concrete thing this utterance introduces that could be independently checked: a third party (a mechanic, a shop attendant, a neighbour), a specific business or place (a named workshop, fuel station, street), or an object that leaves a trace (a receipt, a phone charger, a bank transfer). kind is person | place | business | object | reason. text is a short noun phrase ("the mechanic in Ajah"). why is one short sentence on what verifying it would confirm or contradict.
+NEVER a thread for: Daniel, Tunde, the Corolla, their own car in general, the warehouse, home, work, being alone, a request for a lawyer, or anything already in their earlier claims. When in doubt, return no thread.
 
 subject and value (use exactly these values):
 - location: work | warehouse_area | fuel_station | home | other   ("work", "my job", "my shift" = work, even for former warehouse staff; only the warehouse itself or Admiralty Way = warehouse_area)
@@ -27,16 +30,23 @@ quote: the speaker's exact words for that fact.
 revises_claim_id: if the speaker corrects or contradicts one of their EARLIER claims listed below on the same subject, give that claim's id.
 One claim per fact. Never invent facts. Output JSON only.`;
 
+export interface Thread {
+  kind: "person" | "place" | "business" | "object" | "reason";
+  text: string;
+  why?: string;
+}
+
 export async function extractClaims(room: RoomId, utterance: string, lastQuestion?: string) {
   const key = process.env.GROQ_API_KEY;
-  if (!key) return [];
+  if (!key) return { claims: [], threads: [] as Thread[] };
   const earlier = store.claims
     .filter((c) => c.room === room && c.status === "ACTIVE")
     .map((c) => `${c.id}: ${c.subject}=${c.value}${c.time ? ` at ${c.time}` : ""} ("${c.quote}")`)
     .join("\n");
 
   // Each Groq model has its own per-minute budget: on a 429, move to the next one.
-  const models = [process.env.GROQ_EXTRACT_MODEL || "openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"];
+  // 120b last: it is the research model's budget.
+  const models = [process.env.GROQ_EXTRACT_MODEL || "openai/gpt-oss-20b", "qwen/qwen3.8-27b", "openai/gpt-oss-120b"];
   let res: Response | null = null;
   for (const model of [...new Set(models)]) {
     res = await call(model).catch(() => null as any);
@@ -45,7 +55,10 @@ export async function extractClaims(room: RoomId, utterance: string, lastQuestio
   if (!res?.ok) throw new Error(`extract ${res?.status ?? "timeout"}: ${res ? (await res.text()).slice(0, 160) : ""}`);
   const data: any = await res!.json();
   const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? "{}");
-  return Array.isArray(parsed.claims) ? parsed.claims.filter((c: any) => c && c.subject && c.value) : [];
+  return {
+    claims: Array.isArray(parsed.claims) ? parsed.claims.filter((c: any) => c && c.subject && c.value) : [],
+    threads: (Array.isArray(parsed.threads) ? parsed.threads : []).filter((t: any) => t && t.text && !/\b(daniel|tunde|corolla|lawyer|alone)\b/i.test(t.text)).slice(0, 1) as Thread[],
+  };
 
   function call(model: string) {
     return fetch(GROQ_URL, {

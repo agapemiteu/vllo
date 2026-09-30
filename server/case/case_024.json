@@ -1,21 +1,77 @@
 {
   "case_id": "024",
   "title": "Lekki warehouse break-in",
-  "incident": { "time": "21:10", "date": "Monday", "location": "Admiralty Way warehouse, Lekki" },
+  "incident": {
+    "time": "21:10",
+    "date": "Monday",
+    "location": "Admiralty Way warehouse, Lekki"
+  },
   "evidence": [
-    { "id": "E1", "type": "cctv", "time": "21:17", "label": "CCTV", "detail": "Grey Toyota Corolla, partial plate LSD-4, exits Admiralty Way" },
-    { "id": "E2", "type": "phone", "time": "21:06", "label": "Phone record", "detail": "Daniel's phone connected to mast 400m from the warehouse" },
-    { "id": "E3", "type": "registry", "time": null, "label": "Vehicle registry", "detail": "Grey Corolla LSD-4xx registered to Tunde A." }
+    {
+      "id": "E1",
+      "type": "cctv",
+      "time": "21:17",
+      "label": "CCTV",
+      "detail": "Grey Toyota Corolla, partial plate LSD-4, exits Admiralty Way"
+    },
+    {
+      "id": "E2",
+      "type": "phone",
+      "time": "21:06",
+      "label": "Phone record",
+      "detail": "Daniel's phone connected to mast 400m from the warehouse"
+    },
+    {
+      "id": "E3",
+      "type": "registry",
+      "time": null,
+      "label": "Vehicle registry",
+      "detail": "Grey Corolla LSD-4xx registered to Tunde A."
+    }
   ],
   "interviewees": [
-    { "id": "daniel", "name": "Daniel O.", "role": "Person of interest", "relation": "Former night staff at the warehouse" },
-    { "id": "tunde", "name": "Tunde A.", "role": "Person of interest", "relation": "Daniel's friend, owner of the Corolla" }
+    {
+      "id": "daniel",
+      "name": "Daniel O.",
+      "role": "Person of interest",
+      "relation": "Former night staff at the warehouse",
+      "age": 29,
+      "area": "Ajah, Lagos",
+      "occupation": "Delivery rider (left the warehouse in August)",
+      "on_file": "Worked night shifts at the Admiralty Way warehouse for two years. Phone record places his device 400m from the warehouse at 21:06."
+    },
+    {
+      "id": "tunde",
+      "name": "Tunde A.",
+      "role": "Person of interest",
+      "relation": "Daniel's friend, owner of the Corolla",
+      "age": 31,
+      "area": "Lekki Phase 1, Lagos",
+      "occupation": "Auto parts trader",
+      "on_file": "Registered keeper of a grey Toyota Corolla, plate LSD-4xx, seen on CCTV leaving Admiralty Way at 21:17."
+    }
   ],
   "objectives": [
-    { "id": "O1", "text": "Establish each person's movements 20:00 to 22:00" },
-    { "id": "O2", "text": "Establish who had the Corolla on Monday evening" },
-    { "id": "O3", "text": "Account for Daniel's phone location at 21:06" },
-    { "id": "O4", "text": "Establish whether Daniel and Tunde were together, and when" }
+    {
+      "id": "O1",
+      "text": "Establish each person's movements 20:00 to 22:00"
+    },
+    {
+      "id": "O2",
+      "text": "Establish who had the Corolla on Monday evening"
+    },
+    {
+      "id": "O3",
+      "text": "Account for Daniel's phone location at 21:06"
+    },
+    {
+      "id": "O4",
+      "text": "Establish whether Daniel and Tunde were together, and when"
+    }
   ],
-  "window": { "start": "20:00", "end": "22:00" }
+  "window": {
+    "start": "20:00",
+    "end": "22:00"
+  },
+  "station": "Lekki Division, Interview Rooms A and B"
 }

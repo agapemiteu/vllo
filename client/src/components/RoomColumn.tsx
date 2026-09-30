@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ProcessFeed } from "@/components/ProcessFeed";
 import { Approval, Direct, ModeToggle } from "@/components/Assist";
-import { fileToDataUrl, setPhoto, usePhoto } from "@/components/Face";
+import { uploadPhoto, usePhoto } from "@/components/Face";
 import { avatar, cn, mmss, pretty } from "@/lib/utils";
 import type { RoomId, Snapshot } from "@/lib/useConsole";
 
@@ -81,7 +81,7 @@ export function RoomColumn({
           hidden
           onChange={async (e) => {
             const f = e.target.files?.[0];
-            if (f) setPhoto(id, await fileToDataUrl(f));
+            if (f) await uploadPhoto(id, f);
             e.target.value = "";
           }}
         />

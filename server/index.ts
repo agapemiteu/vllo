@@ -16,6 +16,30 @@ const app = express();
 const dist = fileURLToPath(new URL("../dist", import.meta.url));
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
+
+// Person-of-interest photos, shared by every device (console, plan, room). Kept in memory for the demo.
+const photoData = new Map<RoomId, Buffer>();
+app.post("/api/photo/:id", express.json({ limit: "3mb" }), (req, res) => {
+  const id = req.params.id as RoomId;
+  const m = /^data:image\/(jpeg|png|webp);base64,(.+)$/.exec(String(req.body?.dataUrl ?? ""));
+  if (!ROOMS.includes(id) || !m) return void res.status(400).json({ error: "expected a data URL image for daniel or tunde" });
+  photoData.set(id, Buffer.from(m[2], "base64"));
+  store.photos[id] = Date.now();
+  store.changed();
+  res.json({ ok: true });
+});
+app.delete("/api/photo/:id", (req, res) => {
+  const id = req.params.id as RoomId;
+  photoData.delete(id);
+  if (ROOMS.includes(id)) store.photos[id] = 0;
+  store.changed();
+  res.json({ ok: true });
+});
+app.get("/api/photo/:id", (req, res) => {
+  const buf = photoData.get(req.params.id as RoomId);
+  if (!buf) return void res.status(404).end();
+  res.set("Cache-Control", "no-cache").type("jpeg").send(buf);
+});
 if (existsSync(dist)) {
   app.use(express.static(dist));
   app.get(/^\/(?!ws).*/, (_req, res) => res.sendFile(`${dist}/index.html`));
@@ -80,16 +104,33 @@ server.on("upgrade", (req, socket, head) => {
         }
         if (msg.type === "decide" && bridges[room]) decide(room, { decision: msg.decision, question: msg.question, note: msg.note });
         if (msg.type === "direct" && bridges[room] && typeof msg.text === "string" && msg.text.trim()) bridges[room].direct(msg.text.trim());
+        if (msg.type === "schedule" && bridges[room]) {
+          const at = msg.at == null ? undefined : Number(msg.at);
+          store.plan[room] = { ...store.plan[room], scheduledAt: Number.isFinite(at) ? at : undefined, location: String(msg.location ?? store.plan[room].location).slice(0, 80) };
+          if (msg.mode === "auto" || msg.mode === "assisted") store.setRoom(room, { mode: msg.mode });
+          store.changed();
+        }
+        if (msg.type === "start_room" && bridges[room]) bridges[room].kickoff("investigator");
         if (msg.type === "end_room" && bridges[msg.room as RoomId]) bridges[msg.room as RoomId].finish("investigator");
         if (msg.type === "reset") {
           for (const b of Object.values(bridges)) b.hardReset();
           store.reset();
+          // A slot that already passed would fire again immediately after a reset.
+          for (const r of ROOMS) if ((store.plan[r].scheduledAt ?? Infinity) <= Date.now()) store.plan[r].scheduledAt = undefined;
         }
       });
     });
   }
   socket.destroy();
 });
+
+// Scheduler: a checked-in room whose slot has arrived kicks off on its own.
+setInterval(() => {
+  for (const r of ROOMS) {
+    const p = store.plan[r];
+    if (p.scheduledAt && p.checkedIn && Date.now() >= p.scheduledAt && store.rooms[r].status === "IDLE") bridges[r].kickoff("schedule");
+  }
+}, 1000);
 
 server.listen(PORT, () => {
   console.log(`vllo server on :${PORT}`);
