@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
-import { RoomBridge, setOnRoomEnded } from "./bridge.js";
+import { RoomBridge, setOnRoomEnded, upstreamLog } from "./bridge.js";
 import { store } from "./caseStore.js";
 import { buildReport } from "./report.js";
 import { decide, releaseApproval } from "./tools.js";
@@ -16,6 +16,8 @@ const app = express();
 const dist = fileURLToPath(new URL("../dist", import.meta.url));
 
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
+app.get("/api/debug/:room", (req, res) => res.type("text").send((upstreamLog[req.params.room] ?? []).join("
+")));
 
 // Person-of-interest photos, shared by every device (console, plan, room). Kept in memory for the demo.
 const photoData = new Map<RoomId, Buffer>();

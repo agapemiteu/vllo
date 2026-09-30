@@ -12,6 +12,9 @@ const REMINDER = "\n\nReminder: never accuse, never reveal sources or name other
 
 const KEYTERMS = ["Tunde", "Daniel", "Corolla", "Admiralty Way", "Lekki", "warehouse", "Ajah", "Lekki Phase 1"];
 
+/** Recent upstream events per room, for diagnosing a live deployment (GET /api/debug/:room). */
+export const upstreamLog: Record<string, string[]> = { daniel: [], tunde: [] };
+
 export class RoomBridge {
   private browser: WebSocket | null = null;
   private upstream: WebSocket | null = null;
@@ -272,6 +275,7 @@ export class RoomBridge {
 
   private flushIfIdle(force = false) {
     if (!this.pendingResults.length) return;
+    if (force) upstreamLog[this.room].push(`forced flush of ${this.pendingResults.length} held result(s)`);
     if (!force && this.lastEvent !== "reply.done") {
       // Held because the interviewee started talking. If no reply follows, the agent is waiting on us: release.
       if (this.lastEvent !== "reply.started" && !this.holdTimer) {
@@ -285,6 +289,7 @@ export class RoomBridge {
     if (this.holdTimer) clearTimeout(this.holdTimer);
     this.holdTimer = null;
     for (const t of this.pendingResults) {
+      upstreamLog[this.room].push(`-> tool.result ${t.call_id}`);
       this.sendUp({ type: "tool.result", call_id: t.call_id, result: JSON.stringify(t.result) });
     }
     this.pendingResults = [];
@@ -292,6 +297,12 @@ export class RoomBridge {
 
   private onUpstream(ev: any, ws: WebSocket) {
     const room = this.room;
+    if (ev.type !== "reply.audio" && ev.type !== "transcript.agent.delta" && ev.type !== "transcript.user.delta") {
+      const log = upstreamLog[room];
+      const t = this.state.startedAt ? ((Date.now() - this.state.startedAt) / 1000).toFixed(1) : "-";
+      log.push(`${t} ${ev.type}${ev.status ? ` ${ev.status}` : ""}${ev.name ? ` ${ev.name}` : ""}${ev.code ? ` ${ev.code}: ${ev.message}` : ""} last=${this.lastEvent} pending=${this.pendingResults.length}`);
+      if (log.length > 300) log.splice(0, log.length - 300);
+    }
     switch (ev.type) {
       case "session.ready":
         this.ready = true;
