@@ -26,7 +26,7 @@ export default function Home() {
     <div className="min-h-full bg-white">
       <header className="mx-auto flex max-w-3xl items-center justify-between px-6 py-6">
         <Logo />
-        {s && !full && (
+        {s && (
           <a href="/new">
             <Button>
               <HugeiconsIcon icon={Add01Icon} size={16} /> Interview a suspect
@@ -41,7 +41,7 @@ export default function Home() {
         <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-stone-600">
           vllo interviews suspects and witnesses by voice. It questions them, cross-checks every answer against your evidence and other statements in real time, follows up on contradictions, and delivers a sourced report.
         </p>
-        {s && ids.length === 0 && (
+        {s && (
           <a href="/new" className="mt-8 inline-block">
             <Button size="lg">
               <HugeiconsIcon icon={Add01Icon} size={16} /> Interview a suspect

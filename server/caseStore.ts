@@ -85,6 +85,25 @@ class CaseStore extends EventEmitter {
     this.changed();
   }
 
+  /** Clear one person's interview so their slot can be reused for a fresh session. */
+  resetRoom(r: RoomId) {
+    const gone = new Set(this.claims.filter((c) => c.room === r).map((c) => c.id));
+    this.claims = this.claims.filter((c) => c.room !== r);
+    this.conflicts = this.conflicts.filter((k) => !k.claimIds.some((id) => gone.has(id)) && !k.rooms.includes(r));
+    this.revisions = this.revisions.filter((v) => v.room !== r);
+    this.guardrails = this.guardrails.filter((g) => g.room !== r);
+    this.activity = this.activity.filter((a) => a.room !== r);
+    this.transcript = this.transcript.filter((t) => t.room !== r);
+    this.leads = this.leads.filter((l) => l.room !== r);
+    this.intel = this.intel.filter((i) => i.room !== r);
+    this.pending[r] = [];
+    const mode = this.rooms[r].mode;
+    this.rooms[r] = { ...freshRoom(r), mode };
+    this.plan[r].checkedIn = false;
+    this.report = null;
+    this.changed();
+  }
+
   nextId(prefix: string) {
     this.seq[prefix] = (this.seq[prefix] ?? 0) + 1;
     return `${prefix}${this.seq[prefix]}`;

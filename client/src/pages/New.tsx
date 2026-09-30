@@ -22,8 +22,9 @@ export default function New() {
   const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
 
-  const free = s ? (["daniel", "tunde"] as RoomId[]).filter((r) => !s.registered[r]) : [];
-  const taken = s ? (["daniel", "tunde"] as RoomId[]).filter((r) => s.registered[r]) : [];
+  const done = (r: RoomId) => s!.rooms[r].status === "ENDED" || s!.rooms[r].status === "DISCONNECTED";
+  const free = s ? (["daniel", "tunde"] as RoomId[]).filter((r) => !s.registered[r] || done(r)) : [];
+  const taken = s ? (["daniel", "tunde"] as RoomId[]).filter((r) => s.registered[r] && !done(r)) : [];
   const slot = role ?? free[0] ?? null;
   const other = taken.find((r) => r !== slot);
   const otherName = other && s ? s.case.interviewees.find((p: any) => p.id === other).name.split(" ")[0] : "";

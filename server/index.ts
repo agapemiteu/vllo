@@ -7,6 +7,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { RoomBridge, setOnRoomEnded, upstreamLog } from "./bridge.js";
 import { CASE, restoreDefaultPeople, store } from "./caseStore.js";
 import { buildReport } from "./report.js";
+import { evaluate } from "./conflicts.js";
 import { decide, releaseApproval } from "./tools.js";
 import { agentFor, agentLlm } from "./agents.js";
 import { ROOMS, type RoomId } from "./types.js";
@@ -34,6 +35,12 @@ app.post("/api/register/:id", express.json(), (req, res) => {
   const id = req.params.id as RoomId;
   if (!ROOMS.includes(id)) return void res.status(400).json({ error: "unknown role" });
   const b = req.body ?? {};
+  // A finished interview's slot is reused: clear that person's old session first.
+  if (store.rooms[id].status === "ENDED" || store.rooms[id].status === "DISCONNECTED") {
+    bridges[id].hardReset();
+    store.resetRoom(id);
+    evaluate(store, id);
+  }
   const p = CASE.interviewees.find((x: any) => x.id === id);
   if (typeof b.name === "string" && b.name.trim()) p.name = b.name.trim().slice(0, 60);
   if (typeof b.relation === "string" && b.relation.trim()) p.relation = b.relation.trim().slice(0, 120);
