@@ -15,6 +15,15 @@ const PORT = Number(process.env.PORT || 8787);
 const app = express();
 const dist = fileURLToPath(new URL("../dist", import.meta.url));
 
+// The client may be hosted on another origin (Vercel); allow it to call the API.
+app.use("/api", (req, res, next) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return void res.status(204).end();
+  next();
+});
+
 app.get("/healthz", (_req, res) => res.json({ ok: true }));
 app.get("/api/debug/:room", (req, res) => res.type("text").send((upstreamLog[req.params.room] ?? []).join("\n")));
 

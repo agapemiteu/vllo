@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { avatar, cn } from "@/lib/utils";
+import { apiUrl, avatar, cn } from "@/lib/utils";
 
 /** Photo versions come from the server snapshot; 0 means no photo on file. */
 let versions: Record<string, number> = {};
@@ -12,7 +12,7 @@ export function setPhotoVersions(v: Record<string, number>) {
 
 export function photoUrl(id: string) {
   const v = versions[id];
-  return v ? `/api/photo/${id}?v=${v}` : null;
+  return v ? apiUrl(`/api/photo/${id}?v=${v}`) : null;
 }
 
 export function usePhoto(id: string) {
@@ -28,11 +28,11 @@ export function usePhoto(id: string) {
 
 export async function uploadPhoto(id: string, file: File) {
   const dataUrl = await fileToDataUrl(file);
-  await fetch(`/api/photo/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl }) });
+  await fetch(apiUrl(`/api/photo/${id}`), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dataUrl }) });
 }
 
 export async function removePhoto(id: string) {
-  await fetch(`/api/photo/${id}`, { method: "DELETE" });
+  await fetch(apiUrl(`/api/photo/${id}`), { method: "DELETE" });
 }
 
 /** Person of interest: the photo on file, otherwise a neutral illustrated placeholder. */

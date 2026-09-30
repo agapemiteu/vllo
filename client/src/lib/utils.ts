@@ -13,7 +13,13 @@ export const mmss = (ms: number) => {
   return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 };
 
-export const wsUrl = (path: string) => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
+/** Backend origin. Empty = same origin (local dev, or the Render build). Set VITE_API_URL when the client is hosted elsewhere (Vercel). */
+export const API = (
+  import.meta.env.VITE_API_URL ?? (location.hostname.endsWith(".vercel.app") ? "https://vllo.onrender.com" : "")
+).replace(/\/$/, "");
+export const apiUrl = (path: string) => `${API}${path}`;
+export const wsUrl = (path: string) =>
+  API ? `${API.replace(/^http/, "ws")}${path}` : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 
 export const pretty = (v: string) => v.replace(/_/g, " ");
 
