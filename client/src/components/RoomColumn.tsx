@@ -57,7 +57,15 @@ export function RoomColumn({
   }, [latestRevision?.id]);
 
   const elapsed = room.startedAt ? (room.endedAt ?? Date.now()) - room.startedAt : 0;
-  const badge = STATUS_BADGE[room.status];
+  const plan = s.plan?.[id];
+  const badge =
+    room.status === "IDLE" && plan
+      ? plan.checkedIn
+        ? { v: "green", l: "Checked in" }
+        : plan.scheduledAt
+          ? { v: "amber", l: `Scheduled ${new Date(plan.scheduledAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` }
+          : { v: "muted", l: "Not checked in" }
+      : STATUS_BADGE[room.status];
   const q = room.lastQuestion;
 
   return (
@@ -93,7 +101,7 @@ export function RoomColumn({
           <div className="truncate text-[12px] text-muted-foreground">{person.relation}</div>
           <div className="mt-2 flex items-center gap-1.5">
             <Badge variant={badge.v}>
-              {room.status === "LIVE" && <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />}
+              {(room.status === "LIVE" || badge.l === "Checked in") && <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />}
               {badge.l}
             </Badge>
             <span className="flex-1" />

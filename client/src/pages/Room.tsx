@@ -5,7 +5,7 @@ import { HeadphonesIcon, Mic01Icon, StopCircleIcon } from "@hugeicons/core-free-
 import { Button } from "@/components/ui/button";
 import { startMic, type Mic } from "@/audio/mic";
 import { Player } from "@/audio/player";
-import { avatar, cn, wsUrl } from "@/lib/utils";
+import { avatar, cn, now, syncClock, wsUrl } from "@/lib/utils";
 import { setPhotoVersions, usePhoto } from "@/components/Face";
 
 const countdown = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
@@ -54,6 +54,7 @@ export default function Room({ id }: { id: string }) {
         const msg = JSON.parse(e.data);
         if (msg.type === "room") {
           setPhotoVersions({ [id]: msg.room.photo });
+          syncClock(msg.room.serverNow);
           setRoom(msg.room);
         }
         if (msg.type === "flush") player.current?.flush();
@@ -136,7 +137,7 @@ export default function Room({ id }: { id: string }) {
                     <span className="size-2 animate-pulse rounded-full bg-emerald-400" /> Checked in · microphone ready
                   </div>
                   <p className="mt-4 text-2xl font-medium text-stone-100 tabular-nums">
-                    {room.scheduledAt && room.scheduledAt > Date.now() ? `Your interview begins in ${countdown(room.scheduledAt - Date.now())}` : "Your interview will begin shortly"}
+                    {room.scheduledAt && room.scheduledAt > now() ? `Your interview begins in ${countdown(room.scheduledAt - now())}` : "Your interview will begin shortly"}
                   </p>
                   <p className="mt-3 max-w-md text-[14px] leading-relaxed text-stone-500">
                     Please keep your headphones on. You don't have to answer any question, you can stop at any time, and you can ask for a lawyer.

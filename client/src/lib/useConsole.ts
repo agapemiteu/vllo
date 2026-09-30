@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type {
   Activity, Claim, Conflict, Gap, GuardrailEvent, Intel, Lead, Objective, Revision, RoomId, RoomState,
 } from "../../../server/types";
-import { wsUrl } from "./utils";
+import { syncClock, wsUrl } from "./utils";
 import { setPhotoVersions } from "@/components/Face";
 
 export type { Activity, Claim, Conflict, Gap, GuardrailEvent, Intel, Lead, Objective, Revision, RoomId, RoomState };
@@ -47,6 +47,7 @@ export function useConsole() {
         const msg = JSON.parse(e.data);
         if (msg.type === "snapshot") {
           setPhotoVersions(msg.state.photos ?? {});
+          syncClock(msg.state.now);
           setState(msg.state);
         }
       };

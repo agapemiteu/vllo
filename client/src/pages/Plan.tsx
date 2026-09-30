@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Logo } from "@/components/Logo";
 import { ModeToggle } from "@/components/Assist";
 import { removePhoto, uploadPhoto, usePhoto } from "@/components/Face";
-import { avatar, cn } from "@/lib/utils";
+import { avatar, cn, now } from "@/lib/utils";
 import { useConsole, type RoomId, type Snapshot } from "@/lib/useConsole";
 
 export default function Plan() {
@@ -224,8 +224,8 @@ function ScheduleRow({ s, p, send, last }: { s: Snapshot; p: any; send: (m: unkn
   }, []);
 
   const save = (at: number | null) => send({ type: "schedule", room: id, at, location });
-  const inMin = (mins: number) => save(Date.now() + mins * 60_000);
-  const left = plan.scheduledAt ? plan.scheduledAt - Date.now() : null;
+  const inMin = (mins: number) => send({ type: "schedule", room: id, in: mins * 60_000, location });
+  const left = plan.scheduledAt ? plan.scheduledAt - now() : null;
 
   const status =
     room.status === "LIVE" || room.status === "CONNECTING"

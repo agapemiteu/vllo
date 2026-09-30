@@ -16,3 +16,10 @@ export const mmss = (ms: number) => {
 export const wsUrl = (path: string) => `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 
 export const pretty = (v: string) => v.replace(/_/g, " ");
+
+/** Server clock minus device clock, so countdowns are right on devices whose clock is off. */
+let skew = 0;
+export const syncClock = (serverNow?: number) => {
+  if (serverNow) skew = serverNow - Date.now();
+};
+export const now = () => Date.now() + skew;

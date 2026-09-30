@@ -59,7 +59,9 @@ export default function Console() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-6 border-b bg-white px-5 py-3">
-        <Logo />
+        <a href="/" title="Investigation plan">
+          <Logo />
+        </a>
         <div className="h-5 w-px bg-stone-200" />
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-semibold">

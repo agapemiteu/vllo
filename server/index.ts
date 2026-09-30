@@ -105,7 +105,8 @@ server.on("upgrade", (req, socket, head) => {
         if (msg.type === "decide" && bridges[room]) decide(room, { decision: msg.decision, question: msg.question, note: msg.note });
         if (msg.type === "direct" && bridges[room] && typeof msg.text === "string" && msg.text.trim()) bridges[room].direct(msg.text.trim());
         if (msg.type === "schedule" && bridges[room]) {
-          const at = msg.at == null ? undefined : Number(msg.at);
+          // Relative slots ("in 5 minutes") are computed on the server clock, so device clock skew can't delay a kickoff.
+          const at = msg.in != null ? Date.now() + Number(msg.in) : msg.at == null ? undefined : Number(msg.at);
           store.plan[room] = { ...store.plan[room], scheduledAt: Number.isFinite(at) ? at : undefined, location: String(msg.location ?? store.plan[room].location).slice(0, 80) };
           if (msg.mode === "auto" || msg.mode === "assisted") store.setRoom(room, { mode: msg.mode });
           store.changed();

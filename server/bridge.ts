@@ -161,6 +161,7 @@ export class RoomBridge {
         endReason: r.endReason, endWords: r.endReason ? END_WORDS[r.endReason] : undefined, greeting: greeting(this.room),
         scheduledAt: plan.scheduledAt, location: plan.location, checkedIn: plan.checkedIn, photo: store.photos[this.room],
         station: store.snapshot().case.station,
+        serverNow: Date.now(),
       },
     });
   }

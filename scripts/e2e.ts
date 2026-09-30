@@ -46,7 +46,7 @@ sock.on("open", async () => {
   // Real flow: the room device checks in, the investigator schedules a slot, the scheduler kicks it off.
   sock.send(JSON.stringify({ type: "checkin" }));
   await sleep(300);
-  con.send(JSON.stringify({ type: "schedule", room, at: Date.now() + 5000 }));
+  con.send(JSON.stringify({ type: "schedule", room, in: 5000 }));
   console.log(ts(), "checked in, slot in 5s");
   await silenceUntil(() => agentLines >= 1, 40000);
   await silenceUntil(() => false, 1500);
