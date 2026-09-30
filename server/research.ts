@@ -1,0 +1,58 @@
+/**
+ * Web intelligence via Groq compound models (built-in web search).
+ * Runs async: the interview never waits on it. Findings are pushed back into the agent's context.
+ */
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+
+export interface ResearchResult {
+  summary: string;
+  sources: { title: string; url: string }[];
+}
+
+export async function webResearch(query: string, purpose: string): Promise<ResearchResult> {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) throw new Error("GROQ_API_KEY not set");
+  const model = process.env.GROQ_RESEARCH_MODEL || "groq/compound-mini";
+
+  const res = await fetch(GROQ_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(25_000),
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a research analyst supporting an investigative interview in Lagos, Nigeria. Search the web and return only verifiable facts relevant to the purpose: distances, travel times, opening hours, what a place is, where it is. Three sentences maximum, plain text, no speculation about any person's guilt. If nothing reliable is found, say so in one sentence.",
+        },
+        { role: "user", content: `Query: ${query}\nPurpose: ${purpose}` },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`Groq ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data: any = await res.json();
+  const msg = data.choices?.[0]?.message ?? {};
+  const summary = String(msg.content ?? "").trim() || "No reliable information found.";
+
+  const sources: ResearchResult["sources"] = [];
+  const seen = new Set<string>();
+  for (const t of msg.executed_tools ?? []) {
+    for (const r of t?.search_results?.results ?? []) {
+      if (r?.url && !seen.has(r.url) && sources.length < 4) {
+        seen.add(r.url);
+        sources.push({ title: String(r.title ?? r.url).slice(0, 90), url: r.url });
+      }
+    }
+  }
+  if (!sources.length) {
+    for (const m of summary.matchAll(/https?:\/\/[^\s)\]]+/g)) {
+      if (!seen.has(m[0]) && sources.length < 4) {
+        seen.add(m[0]);
+        sources.push({ title: new URL(m[0]).hostname, url: m[0] });
+      }
+    }
+  }
+  return { summary: summary.replace(/https?:\/\/[^\s)\]]+/g, "").replace(/\s+/g, " ").trim(), sources };
+}
