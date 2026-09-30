@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { store } from "./caseStore.js";
 import { checkAgentTranscript, checkUserTranscript, END_WORDS } from "./guardrails.js";
-import { agentFor, groqLlm } from "./agents.js";
+import { agentFor, agentLlm } from "./agents.js";
 import { extractClaims, type Thread } from "./extractor.js";
 import { greeting, systemPrompt } from "./prompt.js";
 import { AGENT_TOOLS, drainPending, handleTool, releaseApproval, type ToolCtx } from "./tools.js";
@@ -196,16 +196,16 @@ export class RoomBridge {
     this.prompt = systemPrompt(this.room);
     store.setRoom(this.room, { status: "CONNECTING", caption: "", userPartial: "", endReason: undefined, startedAt: Date.now(), endedAt: undefined });
     this.agentId = null;
-    const llm = groqLlm();
+    const llm = agentLlm();
     if (!llm) return this.connect(false);
     agentFor(this.room)
       .then((id) => {
         this.agentId = id;
-        store.log(this.room, { kind: "system", label: "Reasoning on Groq", detail: `${llm.model} · stored agent vllo-${this.room}`, status: "done" });
+        store.log(this.room, { kind: "system", label: "Reasoning model ready", detail: `${llm.model} · stored agent vllo-${this.room}`, status: "done" });
       })
       .catch((e) => {
         console.error(`[${this.room}] stored agent failed`, e.message);
-        store.log(this.room, { kind: "system", label: "Groq agent unavailable, using AssemblyAI managed model", detail: String(e.message).slice(0, 160), status: "warn" });
+        store.log(this.room, { kind: "system", label: "Custom model unavailable, using AssemblyAI managed model", detail: String(e.message).slice(0, 160), status: "warn" });
       })
       .finally(() => this.connect(false));
   }
@@ -255,7 +255,7 @@ export class RoomBridge {
       }
       if (this.state.status === "CONNECTING" && this.agentId) {
         this.agentId = null;
-        store.log(this.room, { kind: "system", label: "Groq agent rejected, using AssemblyAI managed model", status: "warn" });
+        store.log(this.room, { kind: "system", label: "Custom model rejected, using AssemblyAI managed model", status: "warn" });
         return this.connect(false);
       }
       store.setRoom(this.room, { status: "DISCONNECTED", agentState: "LISTENING" });
@@ -275,6 +275,11 @@ export class RoomBridge {
 
   private holdTimer: NodeJS.Timeout | null = null;
   private contextQueue: string[] = [];
+  /** did the current reply produce speech or a tool call? */
+  private replyHadContent = false;
+  private replyAudio = 0;
+  private replyWords = 0;
+  private nudges = 0;
 
   /**
    * System context for the agent. Injecting mid-reply empties that reply, so it is queued
@@ -342,11 +347,16 @@ export class RoomBridge {
         else store.log(room, { kind: "system", label: "Session resumed", status: "done" });
         break;
 
+      case "reply.error":
+        console.error(`[${room}] reply.error`, ev.code, ev.message);
+        store.log(room, { kind: "system", label: `Model error · ${ev.code ?? "reply.error"}`, detail: ev.message, status: "error" });
+        break;
+
       case "session.error":
         console.error(`[${room}] session.error`, ev.code, ev.message, ev.param ?? "");
         if (!this.ready && this.agentId && !["at_capacity", "concurrency_exceeded"].includes(ev.code)) {
           this.agentId = null;
-          store.log(room, { kind: "system", label: "Groq agent rejected, using AssemblyAI managed model", detail: ev.message, status: "warn" });
+          store.log(room, { kind: "system", label: "Custom model rejected, using AssemblyAI managed model", detail: ev.message, status: "warn" });
           this.upstream = null;
           ws.close();
           this.connect(false);
@@ -368,6 +378,7 @@ export class RoomBridge {
         const text = String(ev.text ?? "").trim();
         store.setRoom(room, { userPartial: "", agentState: "THINKING" });
         if (!text) break;
+        this.nudges = 0;
         store.say(room, "interviewee", text);
         store.log(room, { kind: "heard", label: text, status: "done" });
         this.bufferHeard(text);
@@ -387,16 +398,21 @@ export class RoomBridge {
 
       case "reply.started":
         this.lastEvent = ev.type;
+        this.replyHadContent = false;
+        this.replyAudio = 0;
+        this.replyWords = 0;
         this.captionReply = ev.reply_id;
         store.setRoom(room, { agentState: "THINKING" });
         break;
 
       case "reply.audio":
+        this.replyAudio++;
         if (this.browser?.readyState === WebSocket.OPEN) this.browser.send(Buffer.from(ev.data, "base64"), { binary: true });
         if (this.state.agentState !== "SPEAKING") store.setRoom(room, { agentState: "SPEAKING" });
         break;
 
       case "transcript.agent.delta":
+        this.replyWords++;
         if (ev.reply_id !== this.captionReply) {
           this.captionReply = ev.reply_id;
           store.setRoom(room, { caption: "" });
@@ -406,6 +422,7 @@ export class RoomBridge {
 
       case "transcript.agent": {
         const text = String(ev.text ?? "").trim();
+        if (text) this.replyHadContent = true;
         if (!text) break;
         store.setRoom(room, { caption: text });
         this.lastAgentText = text;
@@ -424,6 +441,7 @@ export class RoomBridge {
       }
 
       case "reply.done":
+        upstreamLog[room].push(`   (reply had ${this.replyAudio} audio chunks, ${this.replyWords} words, content=${this.replyHadContent})`);
         this.lastEvent = ev.type;
         if (ev.status === "interrupted") {
           this.pendingResults = [];
@@ -434,6 +452,16 @@ export class RoomBridge {
           this.flushIfIdle();
           this.flushContext();
           store.setRoom(room, { agentState: "LISTENING" });
+          // A reply that said nothing and called nothing leaves the interviewee in silence: nudge, at most twice per turn.
+          if (!this.replyHadContent && !this.ending && this.nudges < 2 && this.state.status === "LIVE") {
+            this.nudges++;
+            const nudge = setTimeout(() => {
+              if (this.lastEvent !== "reply.done" || this.ending) return;
+              upstreamLog[room].push("-> reply.create (empty reply nudge)");
+              this.sendUp({ type: "reply.create", instructions: "Continue the interview now: call set_next_question with your next open question, then ask it aloud." });
+            }, 1200);
+            void nudge;
+          }
           if (this.ending && !this.pendingResults.length && !String(ev.reply_id ?? "").startsWith("fc-")) {
             this.scheduleFinish(1800);
           }
@@ -441,6 +469,7 @@ export class RoomBridge {
         break;
 
       case "tool.call": {
+        this.replyHadContent = true;
         store.setRoom(room, { agentState: "THINKING" });
         let result: unknown;
         const callId = ev.call_id;

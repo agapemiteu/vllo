@@ -8,7 +8,7 @@ import { RoomBridge, setOnRoomEnded, upstreamLog } from "./bridge.js";
 import { store } from "./caseStore.js";
 import { buildReport } from "./report.js";
 import { decide, releaseApproval } from "./tools.js";
-import { agentFor, groqLlm } from "./agents.js";
+import { agentFor, agentLlm } from "./agents.js";
 import { ROOMS, type RoomId } from "./types.js";
 
 const PORT = Number(process.env.PORT || 8787);
@@ -138,7 +138,7 @@ server.listen(PORT, () => {
   console.log(`vllo server on :${PORT}`);
   if (!process.env.ASSEMBLYAI_API_KEY) console.warn("ASSEMBLYAI_API_KEY is not set");
   if (!process.env.GROQ_API_KEY) console.warn("GROQ_API_KEY is not set: managed LLM, no web research");
-  if (groqLlm() && process.env.ASSEMBLYAI_API_KEY) {
+  if (agentLlm() && process.env.ASSEMBLYAI_API_KEY) {
     for (const r of ROOMS)
       agentFor(r).then(
         (id) => console.log(`stored agent vllo-${r}: ${id}`),
